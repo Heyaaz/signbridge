@@ -21,6 +21,7 @@
 ```bash
 nvm use
 npm install
+cp .env.example .env
 ```
 
 ## Run
@@ -28,4 +29,11 @@ npm install
 ```bash
 npm run dev:frontend
 npm run dev:backend
+```
+
+## Docker
+
+```bash
+cp .env.example .env
+docker compose up --build
 ```

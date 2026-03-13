@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  deaf
+  speaker
+  guest
+}
+
+enum RoomStatus {
+  waiting
+  active
+  ended
+}
+
+enum MessageType {
+  text
+  quick_reply
+  sign_intent
+}
+
+model UserSession {
+  id              String            @id @default(cuid())
+  nickname        String
+  role            Role
+  createdAt       DateTime          @default(now())
+  lastSeenAt      DateTime          @default(now())
+  participants    RoomParticipant[]
+  captions        CaptionEvent[]    @relation("CaptionSpeaker")
+  messages        MessageEvent[]    @relation("MessageSender")
+}
+
+model Room {
+  id            String            @id @default(cuid())
+  inviteCode    String            @unique
+  status        RoomStatus        @default(waiting)
+  createdAt     DateTime          @default(now())
+  startedAt     DateTime?
+  endedAt       DateTime?
+  participants  RoomParticipant[]
+  captions      CaptionEvent[]
+  messages      MessageEvent[]
+  callLogs      CallLog[]
+}
+
+model RoomParticipant {
+  id              String       @id @default(cuid())
+  roomId          String
+  sessionId       String
+  joinedAt        DateTime     @default(now())
+  leftAt          DateTime?
+  connectionState String       @default("pending")
+  room            Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  session         UserSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@index([sessionId])
+}
+
+model CaptionEvent {
+  id               String      @id @default(cuid())
+  roomId           String
+  speakerSessionId String
+  content          String
+  isFinal          Boolean     @default(false)
+  sequence         Int
+  createdAt        DateTime    @default(now())
+  room             Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  speaker          UserSession @relation("CaptionSpeaker", fields: [speakerSessionId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@index([speakerSessionId])
+}
+
+model MessageEvent {
+  id              String      @id @default(cuid())
+  roomId          String
+  senderSessionId String
+  content         String
+  messageType     MessageType
+  createdAt       DateTime    @default(now())
+  room            Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender          UserSession @relation("MessageSender", fields: [senderSessionId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@index([senderSessionId])
+}
+
+model CallLog {
+  id           String   @id @default(cuid())
+  roomId       String
+  durationSec  Int      @default(0)
+  captionCount Int      @default(0)
+  messageCount Int      @default(0)
+  endReason    String?
+  createdAt    DateTime @default(now())
+  room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+}
