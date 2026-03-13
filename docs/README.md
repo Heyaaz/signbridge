@@ -41,8 +41,9 @@ SignBridge는 청각 장애인과 비장애인이 영상 통화를 통해 원활
 
 | 문서 | 설명 |
 |------|------|
-| [PRD](./docs/PRD.md) | 제품 요구사항 정의서 |
-| [TECH_SPEC](./docs/TECH_SPEC.md) | 기술 설계 문서 |
+| [PRD](./PRD.md) | 제품 요구사항 정의서 |
+| [TECH_SPEC](./TECH_SPEC.md) | 기술 설계 문서 |
+| [WORKFLOW](./WORKFLOW.md) | 현재 구현 기준 사용자 / 서버 / 실시간 흐름 |
 
 ---
 
