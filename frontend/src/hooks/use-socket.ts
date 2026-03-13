@@ -24,8 +24,13 @@ interface UseSocketOptions {
 
 export function useSocket(options: UseSocketOptions | null) {
   const socketRef = useRef<Socket | null>(null);
+  const latestOptionsRef = useRef<UseSocketOptions | null>(options);
   const [status, setStatus] = useState("socket disconnected");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    latestOptionsRef.current = options;
+  }, [options]);
 
   useEffect(() => {
     if (!options) {
@@ -43,14 +48,19 @@ export function useSocket(options: UseSocketOptions | null) {
     socket.on("connect", async () => {
       setStatus("socket connected");
 
-      const result = (await socket.emitWithAck("room:join", {
-        roomId: options.roomId,
-        sessionToken: options.sessionToken
-      })) as { ok: boolean; error?: string };
+      try {
+        const result = (await socket.emitWithAck("room:join", {
+          roomId: options.roomId,
+          sessionToken: options.sessionToken
+        })) as { ok: boolean; error?: string };
 
-      if (!result.ok) {
+        if (!result.ok) {
+          setStatus("socket join failed");
+          setError(result.error ?? "room join failed");
+        }
+      } catch (joinError) {
         setStatus("socket join failed");
-        setError(result.error ?? "room join failed");
+        setError(joinError instanceof Error ? joinError.message : "room join failed");
       }
     });
 
@@ -64,19 +74,19 @@ export function useSocket(options: UseSocketOptions | null) {
     });
 
     socket.on("room:user-joined", (payload) => {
-      options.onUserJoined?.(payload);
+      latestOptionsRef.current?.onUserJoined?.(payload);
     });
 
     socket.on("room:user-left", (payload) => {
-      options.onUserLeft?.(payload);
+      latestOptionsRef.current?.onUserLeft?.(payload);
     });
 
     socket.on("message:received", (payload) => {
-      options.onMessage?.(payload as QuickReplyMessage);
+      latestOptionsRef.current?.onMessage?.(payload as QuickReplyMessage);
     });
 
     socket.on("call:ended", (payload) => {
-      options.onCallEnded?.(payload);
+      latestOptionsRef.current?.onCallEnded?.(payload);
     });
 
     return () => {
@@ -84,7 +94,7 @@ export function useSocket(options: UseSocketOptions | null) {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [options]);
+  }, [options?.roomId, options?.sessionToken]);
 
   return {
     socket: socketRef.current,

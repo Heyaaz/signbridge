@@ -32,6 +32,7 @@ export function useWebRtc({
   const localStreamRef = useRef<MediaStream | null>(null);
   const offerCreatedRef = useRef(false);
   const [mediaStatus, setMediaStatus] = useState("camera not started");
+  const [peerReady, setPeerReady] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -56,6 +57,7 @@ export function useWebRtc({
 
         const peerConnection = new RTCPeerConnection(RTC_CONFIGURATION);
         peerConnectionRef.current = peerConnection;
+        setPeerReady(true);
 
         localStream.getTracks().forEach((track) => {
           peerConnection.addTrack(track, localStream);
@@ -95,6 +97,7 @@ export function useWebRtc({
 
     return () => {
       mounted = false;
+      setPeerReady(false);
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       peerConnectionRef.current?.close();
     };
@@ -147,7 +150,13 @@ export function useWebRtc({
 
   useEffect(() => {
     async function createOffer() {
-      if (!socket || !peerConnectionRef.current || !shouldCreateOffer || participantCount < 2) {
+      if (
+        !socket ||
+        !peerConnectionRef.current ||
+        !peerReady ||
+        !shouldCreateOffer ||
+        participantCount < 2
+      ) {
         return;
       }
 
@@ -167,7 +176,7 @@ export function useWebRtc({
     }
 
     void createOffer();
-  }, [participantCount, roomId, shouldCreateOffer, socket]);
+  }, [participantCount, peerReady, roomId, shouldCreateOffer, socket]);
 
   return {
     localVideoRef,
