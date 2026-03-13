@@ -36,6 +36,7 @@ export function useWebRtc({
 
   useEffect(() => {
     let mounted = true;
+    offerCreatedRef.current = false;
 
     async function prepareMedia() {
       try {
@@ -104,7 +105,7 @@ export function useWebRtc({
   }, [roomId, socket]);
 
   useEffect(() => {
-    if (!socket || !peerConnectionRef.current) {
+    if (!socket || !peerConnectionRef.current || !peerReady) {
       return;
     }
 
@@ -146,7 +147,7 @@ export function useWebRtc({
       activeSocket.off("webrtc:answer", handleAnswer);
       activeSocket.off("webrtc:ice-candidate", handleIceCandidate);
     };
-  }, [roomId, socket, sessionId]);
+  }, [peerReady, roomId, socket, sessionId]);
 
   useEffect(() => {
     async function createOffer() {
