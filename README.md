@@ -1,18 +1,20 @@
 # SignBridge Workspace
 
-문서(`docs/`) 기준으로 프론트엔드와 백엔드를 분리한 프로젝트 뼈대다.
+`frontend` Next.js App Router 구조
+`backend` NestJS 모듈 폴더 구성
+실시간 통화 / STT / TTS 로직 미구현
 
 ## Structure
 
-- `frontend`: Next.js App Router 기반 UI 골격
-- `backend`: NestJS 기반 API / WebSocket 서버 골격
+- `frontend`: 화면 구조, 라우트, 컴포넌트 배치
+- `backend`: API 경로, WebSocket 모듈 자리, 서비스 스텁
 - `docs`: PRD, 기술 명세
 
 ## Notes
 
-- 비즈니스 로직은 구현하지 않았다.
-- 외부 STT/TTS 연동은 추후 추가 대상이다.
-- 데이터베이스/Prisma 설정은 폴더 구조만 고려하고 아직 포함하지 않았다.
+- 비즈니스 로직 없음
+- 외부 STT/TTS 연동 없음
+- 데이터베이스/Prisma 실제 설정 없음
 
 ## Local Setup
 
