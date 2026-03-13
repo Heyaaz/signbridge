@@ -27,6 +27,7 @@ enum MessageType {
 
 model UserSession {
   id              String            @id @default(cuid())
+  sessionToken    String            @unique
   nickname        String
   role            Role
   createdAt       DateTime          @default(now())
@@ -61,6 +62,7 @@ model RoomParticipant {
 
   @@index([roomId])
   @@index([sessionId])
+  @@unique([roomId, sessionId])
 }
 
 model CaptionEvent {
