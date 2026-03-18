@@ -8,5 +8,8 @@ coverage
 *.log
 backend/prisma/dev.db
 .idea
+__pycache__
+training/venv
+training/output
 
 .claude/
