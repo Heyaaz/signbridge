@@ -284,63 +284,77 @@ MVP는 짧은 오디오 blob 또는 임시 URL 방식을 사용한다.
 
 ## 9. 수화 인식 설계 (확장 기능)
 
-MVP 핵심 기능에서 제외하며, **플러그인형 별도 서비스**로 설계한다.
+> 상세 구현 계획은 `docs/HAND_TRACKING_PLAN.md` 참조
 
-### 9.1 처리 방식
+### 9.1 처리 방식 (하이브리드)
 
-수화 인식은 원본 영상을 직접 번역하는 것이 아니라, 손/몸 landmark를 추출하고 그 시퀀스를 분류하는 방식을 사용한다.
+수화 인식은 **브라우저 내 단어 인식 + AI API 문장화** 하이브리드 방식을 사용한다.
 
 ```
 카메라 영상
-  → MediaPipe Holistic (landmark 추출)
+  → MediaPipe Hands (브라우저, 손 랜드마크 추출)
       - 왼손 21 포인트
       - 오른손 21 포인트
-      - 신체 포즈 포인트
-  → 프레임 시퀀스 버퍼 (N개 프레임)
-  → 분류 모델 (LSTM / GRU)
-  → 확률 기반 label 출력
-  → NestJS로 전달
-  → 자막/메시지 흐름에 합산
+  → 좌표 정규화 (손목 기준, 스케일 불변)
+  → 슬라이딩 윈도우 (30프레임)
+  → LSTM 분류 모델 (TF.js, 브라우저 내 추론)
+  → 단어 단위 partial 자막 즉시 표시      ← ~0.3초
+  → 동작 멈춤 감지 (1.5초 idle)
+  → 축적된 단어 → NestJS → AI API 문장화
+  → SSE 스트리밍으로 final 자막 표시       ← ~1.5~2.5초
 ```
 
-### 9.2 MVP 인식 대상 (5~10개 단어)
+### 9.2 MVP 인식 대상 (10개 단어 + idle)
 
 | 수화 | 출력 |
 |------|------|
+| idle | (표시 안 함) |
 | 네 | 네 |
 | 아니요 | 아니요 |
 | 감사합니다 | 감사합니다 |
 | 잠시만요 | 잠시만 기다려 주세요 |
 | 다시 | 다시 말씀해 주세요 |
+| 도움 | 도움이 필요합니다 |
+| 괜찮아요 | 괜찮습니다 |
+| 모르겠어요 | 잘 모르겠습니다 |
+| 안녕하세요 | 안녕하세요 |
+| 죄송합니다 | 죄송합니다 |
 
 ### 9.3 인식 UX
 
-완전 자동 인식보다 **반자동 방식**이 더 안정적이다.
+**자동 방식**으로 구현한다. STT 자막과 동일한 UX.
 
 ```
-[수화 입력 시작] 버튼 누름
-  → 2초간 landmark 수집
-  → 분류 모델 실행
-  → 결과 확인 ("감사합니다" 맞습니까?)
-  → 확정 후 전송
+[수화 모드 ON] 토글 버튼
+  → 핸드 트래킹 시작
+  → 수어 동작 시 단어 단위 partial 자막 자동 표시
+  → 동작 멈추면 AI가 문장화하여 final 자막 표시
+  → 상대방 화면에도 동일하게 표시
 ```
 
-### 9.4 서비스 분리 구조
+### 9.4 아키텍처
 
 ```
-Next.js
-  → MediaPipe landmark 추출
-  → gesture payload 전송
-  → Python recognition service (FastAPI)
-  → recognized intent 반환
-  → NestJS
-  → 상대방 UI 표시
+Next.js (브라우저)
+  → MediaPipe Hands (랜드마크 추출)
+  → TF.js LSTM (단어 분류, 브라우저 내)
+  → sign:partial WebSocket (단어 단위 자막)
+  → POST /sign/compose (단어 축적 → AI 문장화)
+  → sign:final WebSocket (확정 자막)
+
+NestJS
+  → Sign Gateway (sign:mode, sign:partial, sign:final 이벤트)
+  → Sign Compose API (AI API 호출, SSE 스트리밍 응답)
+  → DB 저장 (MessageEvent, type: sign_intent)
 ```
 
-| 서비스 | 역할 |
-|--------|------|
-| NestJS | 룸, signaling, 메시지, 자막, TTS |
-| Python (FastAPI) | 수화/제스처 인식 |
+| 처리 | 위치 | 지연 |
+|------|------|------|
+| 랜드마크 추출 | 브라우저 (MediaPipe) | 실시간 |
+| 단어 분류 | 브라우저 (TF.js) | ~0.3초 |
+| 문장화 | 서버 (AI API) | ~1~2초 |
+
+모델 학습 코드는 별도 레포지토리(signbridge-model)에서 관리한다.
 
 ---
 
