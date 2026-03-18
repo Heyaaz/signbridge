@@ -1,11 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CaptionPanel } from "@/components/caption/caption-panel";
 import { TextResponsePanel } from "@/components/chat/text-response-panel";
 import { ConnectionStatus } from "@/components/controls/connection-status";
+import { HandOverlay } from "@/components/hand-tracking/hand-overlay";
+import { SignModeButton } from "@/components/hand-tracking/sign-mode-button";
 import { QuickRepliesPanel } from "@/components/quick-replies/quick-replies-panel";
+import { useHandTracking } from "@/hooks/use-hand-tracking";
 import { useSocket } from "@/hooks/use-socket";
 import { useWebRtc } from "@/hooks/use-webrtc";
 import { getQuickReplies, getRoom } from "@/lib/api";
@@ -125,6 +128,13 @@ export function CallLayout({ roomId }: CallLayoutProps) {
     shouldCreateOffer
   });
 
+  // 수화 모드: 로컬 비디오 위에 손 랜드마크 오버레이
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const { isSignMode, toggleSignMode, isHandDetected } = useHandTracking({
+    localVideoRef,
+    canvasRef,
+  });
+
   function sendTextMessage() {
     if (!socket || !session || !messageInput.trim()) {
       return;
@@ -210,17 +220,27 @@ export function CallLayout({ roomId }: CallLayoutProps) {
               playsInline
               className="aspect-video w-full rounded-[1.5rem] bg-[#1f2937] object-cover"
             />
-            <video
-              ref={localVideoRef}
-              autoPlay
-              muted
-              playsInline
-              className="aspect-[4/5] w-full rounded-[1.5rem] bg-[#334155] object-cover"
-            />
+            {/* 로컬 비디오 + 수화 모드 캔버스 오버레이 */}
+            <div className="relative">
+              <video
+                ref={localVideoRef}
+                autoPlay
+                muted
+                playsInline
+                className="aspect-[4/5] w-full rounded-[1.5rem] bg-[#334155] object-cover"
+              />
+              <HandOverlay canvasRef={canvasRef} isVisible={isSignMode} />
+            </div>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-[var(--muted)]">
             <span>invite {room?.inviteCode ?? session.inviteCode}</span>
             <span>participants {room?.participants.length ?? 0}/2</span>
+            {/* 수화 모드 토글 버튼 */}
+            <SignModeButton
+              isSignMode={isSignMode}
+              isHandDetected={isHandDetected}
+              onClick={toggleSignMode}
+            />
             <button
               onClick={endCall}
               className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 font-medium text-rose-700"
