@@ -13,6 +13,7 @@ collect_landmarks.py
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -50,22 +51,69 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def normalize_landmarks(hand_landmarks: list[dict]) -> list[dict] | None:
+    """
+    손 랜드마크를 손목 기준 좌표 + 스케일 정규화한다.
+
+    - 위치 불변성: 손목(landmark 0)을 원점으로 모든 좌표에서 손목 좌표를 뺀다.
+    - 크기 불변성: 손목 → 중지 MCP(landmark 9) 거리로 나눠 카메라 거리에 무관하게 만든다.
+
+    반환: 정규화된 랜드마크 리스트. 스케일이 너무 작으면 None 반환.
+    """
+    if not hand_landmarks:
+        return None
+
+    wrist = hand_landmarks[0]       # landmark 0 = 손목
+    middle_mcp = hand_landmarks[9]  # landmark 9 = 중지 MCP
+
+    # 손목 → 중지 MCP 거리를 스케일 기준으로 사용
+    scale = math.sqrt(
+        (middle_mcp['x'] - wrist['x']) ** 2 +
+        (middle_mcp['y'] - wrist['y']) ** 2 +
+        (middle_mcp['z'] - wrist['z']) ** 2
+    )
+
+    # 스케일이 거의 0이면 정규화 불가 (손이 접혀 있거나 감지 오류)
+    if scale < 1e-6:
+        return None
+
+    normalized = []
+    for lm in hand_landmarks:
+        normalized.append({
+            'x': (lm['x'] - wrist['x']) / scale,
+            'y': (lm['y'] - wrist['y']) / scale,
+            'z': (lm['z'] - wrist['z']) / scale,
+        })
+
+    return normalized
+
+
 def extract_landmarks(hand_landmarks_list) -> np.ndarray:
     """
-    MediaPipe 손 랜드마크 목록(최대 2개)에서 좌표 배열을 추출한다.
-    손이 감지되지 않은 경우 0으로 채운다.
+    MediaPipe 손 랜드마크 목록(최대 2개)에서 정규화된 좌표 배열을 추출한다.
+    각 손에 대해 손목 기준 좌표 정규화 + 스케일 정규화를 적용한다.
+    손이 감지되지 않거나 정규화에 실패한 경우 0으로 채운다.
 
-    반환: shape (126,) — 양손 각 21포인트 × xyz
+    반환: shape (126,) — 양손 각 21포인트 × xyz (정규화된 값)
     """
     result = np.zeros(NUM_HAND_LANDMARKS * LANDMARK_DIMS * 2, dtype=np.float32)
 
     for hand_idx, hand_landmarks in enumerate(hand_landmarks_list[:2]):
+        # MediaPipe landmark 객체를 딕셔너리 리스트로 변환
+        raw = [{'x': lm.x, 'y': lm.y, 'z': lm.z} for lm in hand_landmarks.landmark]
+
+        # 정규화 적용
+        normalized = normalize_landmarks(raw)
+        if normalized is None:
+            # 정규화 실패 시 해당 손 좌표는 0으로 유지
+            continue
+
         offset = hand_idx * NUM_HAND_LANDMARKS * LANDMARK_DIMS
-        for lm_idx, lm in enumerate(hand_landmarks.landmark):
+        for lm_idx, lm in enumerate(normalized):
             base = offset + lm_idx * LANDMARK_DIMS
-            result[base]     = lm.x
-            result[base + 1] = lm.y
-            result[base + 2] = lm.z
+            result[base]     = lm['x']
+            result[base + 1] = lm['y']
+            result[base + 2] = lm['z']
 
     return result
 

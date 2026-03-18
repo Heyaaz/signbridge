@@ -43,7 +43,7 @@ python train.py
 
 - 입력 데이터: `data/processed/`
 - 학습된 모델 저장: `output/model.pt`
-- Train / Val = 85% / 15% 분리
+- Train / Val / Test = 70% / 15% / 15% 분리
 
 ---
 

@@ -19,6 +19,7 @@ LSTM 기반 수어 분류 모델 정의 및 학습 스크립트.
 """
 
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -51,6 +52,88 @@ BATCH_SIZE      = 32
 EPOCHS          = 60
 LEARNING_RATE   = 1e-3
 DEVICE          = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+# ── 랜드마크 정규화 ────────────────────────────────────────────────────────────
+def normalize_landmarks(hand_landmarks: list[dict]) -> list[dict] | None:
+    """
+    손 랜드마크를 손목 기준 좌표 + 스케일 정규화한다.
+
+    - 위치 불변성: 손목(landmark 0)을 원점으로 모든 좌표에서 손목 좌표를 뺀다.
+    - 크기 불변성: 손목 → 중지 MCP(landmark 9) 거리로 나눠 카메라 거리에 무관하게 만든다.
+
+    반환: 정규화된 랜드마크 리스트. 스케일이 너무 작으면 None 반환.
+    """
+    if not hand_landmarks:
+        return None
+
+    wrist = hand_landmarks[0]       # landmark 0 = 손목
+    middle_mcp = hand_landmarks[9]  # landmark 9 = 중지 MCP
+
+    # 손목 → 중지 MCP 거리를 스케일 기준으로 사용
+    scale = math.sqrt(
+        (middle_mcp['x'] - wrist['x']) ** 2 +
+        (middle_mcp['y'] - wrist['y']) ** 2 +
+        (middle_mcp['z'] - wrist['z']) ** 2
+    )
+
+    # 스케일이 거의 0이면 정규화 불가 (손이 접혀 있거나 감지 오류)
+    if scale < 1e-6:
+        return None
+
+    normalized = []
+    for lm in hand_landmarks:
+        normalized.append({
+            'x': (lm['x'] - wrist['x']) / scale,
+            'y': (lm['y'] - wrist['y']) / scale,
+            'z': (lm['z'] - wrist['z']) / scale,
+        })
+
+    return normalized
+
+
+def normalize_sequence(sequence: np.ndarray) -> np.ndarray:
+    """
+    (30, 126) 시퀀스 전체에 프레임 단위 정규화를 적용한다.
+    collect_landmarks.py 가 생성한 raw JSON 데이터를 학습 시 재사용할 때 호환성을 위해 사용한다.
+
+    각 프레임(126차원)은 [손0(63차원), 손1(63차원)] 구조이며
+    21포인트 × xyz = 63 으로 구성된다.
+    """
+    NUM_LM = 21   # 한 손당 랜드마크 수
+    DIMS   = 3    # x, y, z
+
+    normalized_seq = np.zeros_like(sequence)
+
+    for frame_idx, frame in enumerate(sequence):
+        for hand_idx in range(2):
+            offset = hand_idx * NUM_LM * DIMS
+
+            # raw 좌표를 딕셔너리 리스트로 변환
+            raw = []
+            for lm_idx in range(NUM_LM):
+                base = offset + lm_idx * DIMS
+                raw.append({
+                    'x': float(frame[base]),
+                    'y': float(frame[base + 1]),
+                    'z': float(frame[base + 2]),
+                })
+
+            # 손목이 모두 0이면 해당 손은 미감지 → 0 유지
+            if raw[0]['x'] == 0.0 and raw[0]['y'] == 0.0 and raw[0]['z'] == 0.0:
+                continue
+
+            norm = normalize_landmarks(raw)
+            if norm is None:
+                continue
+
+            for lm_idx, lm in enumerate(norm):
+                base = offset + lm_idx * DIMS
+                normalized_seq[frame_idx][base]     = lm['x']
+                normalized_seq[frame_idx][base + 1] = lm['y']
+                normalized_seq[frame_idx][base + 2] = lm['z']
+
+    return normalized_seq
 
 
 # ── 데이터 전처리 ──────────────────────────────────────────────────────────────
@@ -90,6 +173,10 @@ def preprocess_raw_data() -> tuple[np.ndarray, np.ndarray, list[str]]:
             if sequence.shape[0] != SEQUENCE_LENGTH:
                 print(f"    [경고] 길이 불일치 ({sequence.shape[0]}프레임) — 스킵: {jf.name}")
                 continue
+
+            # raw 데이터 호환을 위해 정규화 적용
+            # (collect_landmarks.py 가 이미 정규화한 경우에도 손목=원점이므로 멱등성 보장)
+            sequence = normalize_sequence(sequence)
 
             X_list.append(sequence)
             y_list.append(label_idx)
