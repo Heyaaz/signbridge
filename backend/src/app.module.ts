@@ -7,6 +7,7 @@ import { CaptionModule } from "./modules/caption/caption.module";
 import { QuickReplyModule } from "./modules/quick-reply/quick-reply.module";
 import { RoomModule } from "./modules/room/room.module";
 import { SignalingModule } from "./modules/signaling/signaling.module";
+import { SignModule } from "./modules/sign/sign.module";
 import { TtsModule } from "./modules/tts/tts.module";
 
 @Module({
@@ -18,6 +19,7 @@ import { TtsModule } from "./modules/tts/tts.module";
     PrismaModule,
     RoomModule,
     SignalingModule,
+    SignModule,
     CaptionModule,
     TtsModule,
     QuickReplyModule
