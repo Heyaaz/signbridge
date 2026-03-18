@@ -48,3 +48,26 @@ export interface QuickReplyMessage {
   messageType: "text" | "quick_reply";
   createdAt: string;
 }
+
+export type TtsResponse =
+  | {
+      ok: true;
+      provider: "browser";
+      mode: "client-speech-synthesis";
+      text: string;
+      lang: string;
+      voice: string;
+    }
+  | {
+      ok: true;
+      provider: "openai";
+      mode: "audio-data-url";
+      text: string;
+      lang: string;
+      voice: string;
+      audio: {
+        mimeType: string;
+        base64: string;
+        dataUrl: string;
+      };
+    };

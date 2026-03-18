@@ -9,9 +9,10 @@ import { HandOverlay } from "@/components/hand-tracking/hand-overlay";
 import { SignModeButton } from "@/components/hand-tracking/sign-mode-button";
 import { QuickRepliesPanel } from "@/components/quick-replies/quick-replies-panel";
 import { useHandTracking } from "@/hooks/use-hand-tracking";
+import { useSpeechCaptions } from "@/hooks/use-speech-captions";
 import { useSocket } from "@/hooks/use-socket";
 import { useWebRtc } from "@/hooks/use-webrtc";
-import { getQuickReplies, getRoom } from "@/lib/api";
+import { createTtsAudio, getQuickReplies, getRoom } from "@/lib/api";
 import { loadRoomSession } from "@/lib/session";
 import { QuickReplyMessage, RoomSession, RoomSummary } from "@/types/signbridge";
 
@@ -26,6 +27,9 @@ export function CallLayout({ roomId }: CallLayoutProps) {
   const [messageInput, setMessageInput] = useState("");
   const [messageFeed, setMessageFeed] = useState<QuickReplyMessage[]>([]);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [speechPartialCaption, setSpeechPartialCaption] = useState<string | null>(null);
+  const [speechFinalCaptions, setSpeechFinalCaptions] = useState<string[]>([]);
+  const [ttsStatus, setTtsStatus] = useState("tts idle");
 
   // 상대방 수화 인식 자막 상태
   // partialCaption: 인식 중인 임시 자막, finalCaptions: 확정된 자막 목록
@@ -91,13 +95,8 @@ export function CallLayout({ roomId }: CallLayoutProps) {
           },
           onMessage: (payload) => {
             setMessageFeed((currentFeed) => [...currentFeed.slice(-7), payload]);
-            if (
-              typeof window !== "undefined" &&
-              "speechSynthesis" in window &&
-              payload.sessionId !== session.sessionId
-            ) {
-              window.speechSynthesis.cancel();
-              window.speechSynthesis.speak(new SpeechSynthesisUtterance(payload.content));
+            if (payload.sessionId !== session.sessionId) {
+              void playTts(payload.content);
             }
           },
           onCallEnded: () => {
@@ -109,6 +108,16 @@ export function CallLayout({ roomId }: CallLayoutProps) {
                   }
                 : currentRoom
             );
+          },
+          onCaptionPartial: (payload) => {
+            setSpeechPartialCaption(`[음성] ${payload.nickname}: ${payload.content}`);
+          },
+          onCaptionFinal: (payload) => {
+            setSpeechPartialCaption(null);
+            setSpeechFinalCaptions((current) => [
+              ...current.slice(-7),
+              `[음성] ${payload.nickname}: ${payload.content}`
+            ]);
           },
           // 수화 인식 임시 자막 수신 — 상대방 세션에서 온 경우에만 표시
           onSignPartial: (data) => {
@@ -158,12 +167,56 @@ export function CallLayout({ roomId }: CallLayoutProps) {
     shouldCreateOffer
   });
 
+  const { status: sttStatus, supported: sttSupported } = useSpeechCaptions({
+    enabled:
+      Boolean(socket) &&
+      Boolean(session) &&
+      session?.role !== "deaf" &&
+      !mediaStatus.startsWith("camera error"),
+    socket
+  });
+
   // 수화 모드: 로컬 비디오 위에 손 랜드마크 오버레이
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const { isSignMode, toggleSignMode, isHandDetected } = useHandTracking({
     localVideoRef,
     canvasRef,
   });
+
+  async function playTts(content: string) {
+    setTtsStatus("tts preparing");
+
+    try {
+      const response = await createTtsAudio({
+        text: content,
+        lang: "ko-KR"
+      });
+
+      if (response.mode === "audio-data-url") {
+        if (typeof window !== "undefined" && "speechSynthesis" in window) {
+          window.speechSynthesis.cancel();
+        }
+        const audio = new Audio(response.audio.dataUrl);
+        await audio.play();
+        setTtsStatus(`tts ${response.provider}`);
+        return;
+      }
+
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(response.text);
+        utterance.lang = response.lang;
+        window.speechSynthesis.speak(utterance);
+        setTtsStatus(`tts ${response.provider}`);
+        return;
+      }
+
+      setTtsStatus("tts unavailable");
+    } catch (error) {
+      setTtsStatus("tts failed");
+      setPageError(error instanceof Error ? error.message : "tts playback failed");
+    }
+  }
 
   function sendTextMessage() {
     if (!socket || !session || !messageInput.trim()) {
@@ -227,14 +280,22 @@ export function CallLayout({ roomId }: CallLayoutProps) {
     ...(partialCaption ? [`[수화 인식 중] ${partialCaption}…`] : [])
   ];
 
+  const speechCaptionEntries = [
+    ...speechFinalCaptions,
+    ...(speechPartialCaption ? [`${speechPartialCaption}…`] : [])
+  ];
+
   const activityEntries = [
     `socket ${status}`,
     `media ${mediaStatus}`,
+    sttSupported ? sttStatus : "stt unsupported",
+    ttsStatus,
     `room ${room?.status ?? "loading"}`,
     ...(remoteSignModeEnabled ? ["상대방 수화 모드 활성화"] : []),
     ...(socketError ? [`error ${socketError}`] : []),
     ...(pageError ? [`error ${pageError}`] : []),
     ...messageFeed.map((message) => `${message.nickname}: ${message.content}`),
+    ...speechCaptionEntries,
     ...signCaptionEntries
   ].slice(-8);
 

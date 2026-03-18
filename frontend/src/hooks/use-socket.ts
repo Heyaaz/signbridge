@@ -20,6 +20,21 @@ interface UseSocketOptions {
   onUserLeft?: (payload: { roomId: string; sessionId: string }) => void;
   onMessage?: (payload: QuickReplyMessage) => void;
   onCallEnded?: (payload: { roomId: string; sessionId: string }) => void;
+  onCaptionPartial?: (payload: {
+    roomId: string;
+    sessionId: string;
+    nickname: string;
+    content: string;
+  }) => void;
+  onCaptionFinal?: (payload: {
+    id: string;
+    roomId: string;
+    sessionId: string;
+    nickname: string;
+    content: string;
+    sequence: number;
+    createdAt: string;
+  }) => void;
   // 수화 인식 이벤트 콜백 (sign.gateway.ts 브로드캐스트 수신)
   onSignPartial?: (data: {
     roomId: string;
@@ -105,6 +120,14 @@ export function useSocket(options: UseSocketOptions | null) {
 
     socket.on("call:ended", (payload) => {
       latestOptionsRef.current?.onCallEnded?.(payload);
+    });
+
+    socket.on("caption:partial", (payload) => {
+      latestOptionsRef.current?.onCaptionPartial?.(payload);
+    });
+
+    socket.on("caption:final", (payload) => {
+      latestOptionsRef.current?.onCaptionFinal?.(payload);
     });
 
     // 수화 인식 이벤트 리스너 등록 (sign.gateway.ts 브로드캐스트)

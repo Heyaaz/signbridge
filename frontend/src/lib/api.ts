@@ -2,7 +2,8 @@ import {
   CreateRoomResponse,
   JoinRoomResponse,
   Role,
-  RoomSummary
+  RoomSummary,
+  TtsResponse
 } from "@/types/signbridge";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
@@ -58,4 +59,11 @@ export async function getRoom(roomId: string) {
 
 export async function getQuickReplies() {
   return request<string[]>("/quick-replies");
+}
+
+export async function createTtsAudio(payload: { text: string; lang?: string }) {
+  return request<TtsResponse>("/tts", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
