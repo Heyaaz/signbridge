@@ -20,6 +20,24 @@ interface UseSocketOptions {
   onUserLeft?: (payload: { roomId: string; sessionId: string }) => void;
   onMessage?: (payload: QuickReplyMessage) => void;
   onCallEnded?: (payload: { roomId: string; sessionId: string }) => void;
+  // 수화 인식 이벤트 콜백 (sign.gateway.ts 브로드캐스트 수신)
+  onSignPartial?: (data: {
+    roomId: string;
+    fromSessionId: string;
+    content: string;
+    confidence: number;
+  }) => void;
+  onSignFinal?: (data: {
+    roomId: string;
+    fromSessionId: string;
+    content: string;
+    confidence: number;
+  }) => void;
+  onSignModeChanged?: (data: {
+    roomId: string;
+    fromSessionId: string;
+    enabled: boolean;
+  }) => void;
 }
 
 export function useSocket(options: UseSocketOptions | null) {
@@ -87,6 +105,19 @@ export function useSocket(options: UseSocketOptions | null) {
 
     socket.on("call:ended", (payload) => {
       latestOptionsRef.current?.onCallEnded?.(payload);
+    });
+
+    // 수화 인식 이벤트 리스너 등록 (sign.gateway.ts 브로드캐스트)
+    socket.on("sign:partial", (data) => {
+      latestOptionsRef.current?.onSignPartial?.(data);
+    });
+
+    socket.on("sign:final", (data) => {
+      latestOptionsRef.current?.onSignFinal?.(data);
+    });
+
+    socket.on("sign:mode-changed", (data) => {
+      latestOptionsRef.current?.onSignModeChanged?.(data);
     });
 
     return () => {

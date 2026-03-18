@@ -27,6 +27,13 @@ export function CallLayout({ roomId }: CallLayoutProps) {
   const [messageFeed, setMessageFeed] = useState<QuickReplyMessage[]>([]);
   const [pageError, setPageError] = useState<string | null>(null);
 
+  // 상대방 수화 인식 자막 상태
+  // partialCaption: 인식 중인 임시 자막, finalCaptions: 확정된 자막 목록
+  const [partialCaption, setPartialCaption] = useState<string | null>(null);
+  const [finalCaptions, setFinalCaptions] = useState<string[]>([]);
+  // 상대방 수화 모드 활성화 여부
+  const [remoteSignModeEnabled, setRemoteSignModeEnabled] = useState(false);
+
   useEffect(() => {
     setSession(loadRoomSession(roomId));
   }, [roomId]);
@@ -102,6 +109,29 @@ export function CallLayout({ roomId }: CallLayoutProps) {
                   }
                 : currentRoom
             );
+          },
+          // 수화 인식 임시 자막 수신 — 상대방 세션에서 온 경우에만 표시
+          onSignPartial: (data) => {
+            if (data.fromSessionId !== session.sessionId) {
+              setPartialCaption(data.content);
+            }
+          },
+          // 수화 인식 확정 자막 수신 — 최근 8개까지 유지
+          onSignFinal: (data) => {
+            if (data.fromSessionId !== session.sessionId) {
+              setPartialCaption(null);
+              setFinalCaptions((prev) => [...prev.slice(-7), data.content]);
+            }
+          },
+          // 상대방 수화 모드 변경 수신
+          onSignModeChanged: (data) => {
+            if (data.fromSessionId !== session.sessionId) {
+              setRemoteSignModeEnabled(data.enabled);
+              if (!data.enabled) {
+                // 상대방이 수화 모드를 끄면 임시 자막 초기화
+                setPartialCaption(null);
+              }
+            }
           }
         }
       : null
@@ -190,14 +220,23 @@ export function CallLayout({ roomId }: CallLayoutProps) {
     );
   }
 
+  // 수화 자막 + 메시지 피드를 합산해 CaptionPanel에 전달
+  // 확정 자막은 [수화] 접두어로 구분, 임시 자막은 말줄임표로 표시
+  const signCaptionEntries = [
+    ...finalCaptions.map((text) => `[수화] ${text}`),
+    ...(partialCaption ? [`[수화 인식 중] ${partialCaption}…`] : [])
+  ];
+
   const activityEntries = [
     `socket ${status}`,
     `media ${mediaStatus}`,
     `room ${room?.status ?? "loading"}`,
+    ...(remoteSignModeEnabled ? ["상대방 수화 모드 활성화"] : []),
     ...(socketError ? [`error ${socketError}`] : []),
     ...(pageError ? [`error ${pageError}`] : []),
-    ...messageFeed.map((message) => `${message.nickname}: ${message.content}`)
-  ].slice(-6);
+    ...messageFeed.map((message) => `${message.nickname}: ${message.content}`),
+    ...signCaptionEntries
+  ].slice(-8);
 
   return (
     <main className="mx-auto grid min-h-screen max-w-7xl gap-6 px-5 py-6 lg:grid-cols-[1.45fr_0.95fr]">

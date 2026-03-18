@@ -162,7 +162,15 @@ export function useHandTracking({
   // 수화 모드 시작: MediaPipe 초기화 및 rAF 루프 시작
   const startHandTracking = useCallback(async (abortSignal: { aborted: boolean }) => {
     const videoEl = localVideoRef.current;
-    if (!videoEl || isRunningRef.current) return;
+
+    // 비디오 요소가 없으면 수화 모드를 true로 유지하지 않고 복구 (이슈 C-2)
+    if (!videoEl) {
+      console.warn("[useHandTracking] 비디오 요소를 찾을 수 없습니다");
+      setIsSignMode(false);
+      return;
+    }
+
+    if (isRunningRef.current) return;
 
     try {
       // MediaPipe 라이브러리 동적 로드 (CDN 방식)
