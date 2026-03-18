@@ -76,7 +76,9 @@ STT와 대칭 구조로 설계한다.
 
 ---
 
-## 4. 실시간 인식 파이프라인
+## 4. 실시간 인식 파이프라인 (하이브리드)
+
+단어 인식은 브라우저에서 즉시 하고, 모인 단어를 AI API로 자연스러운 문장으로 만든다.
 
 ```
 [수화 모드 ON]
@@ -85,27 +87,62 @@ MediaPipe Hands (매 프레임)
     ↓
 랜드마크 → Ring Buffer (최근 30프레임 유지)
     ↓
-매 10프레임마다 슬라이딩 윈도우 분류 (TF.js)
+매 10프레임마다 슬라이딩 윈도우 분류 (TF.js, 브라우저 내)
     ↓
 ┌─ idle (수화 아님) → 무시
 │
 └─ 수어 감지 (confidence ≥ 0.7)
     ↓
-  partial 자막 표시 (내 화면 + 상대방 화면)
+  sign:partial → 단어 단위 자막 즉시 표시        ← 지연 ~0.3초
     ↓
-  같은 단어 3회 연속 인식 → final 자막 확정
+  단어 버퍼에 축적 ("도움", "필요", "감사")
     ↓
-  쿨다운 (1.5초) → 다음 수어 대기
+  동작 멈춤 감지 (1.5초간 idle)
+    ↓
+  축적된 단어 → NestJS → AI API (문장화)
+    ↓
+  SSE 스트리밍으로 자연스러운 문장 반환            ← 지연 ~1~2초
+    ↓
+  sign:final → 확정 자막 표시
+    ("도움이 필요합니다, 감사합니다")
 ```
+
+### 상대방 화면에서 보이는 흐름
+
+```
+0.0초  수어 시작
+1.3초  🤟 도움 (partial)
+2.6초  🤟 도움, 필요 (partial)
+3.9초  🤟 도움, 필요, 감사 (partial)
+4.0초  동작 멈춤 → AI 문장화 요청
+5.5초  🤟 도움이 필요합니다, 감사합니다 (final)
+```
+
+partial 자막이 단어 단위로 즉시 나오기 때문에 상대방은 수어 중에도 내용을 파악할 수 있다.
+AI 문장화는 매끄러운 최종 자막을 위한 보조 역할이다.
+
+### 예상 레이턴시
+
+| 단계 | 소요 시간 | 설명 |
+|------|-----------|------|
+| 수어 동작 | 단어당 ~1초 | 사용자가 수어하는 시간 |
+| LSTM 인식 | ~0.3초 | 브라우저 내, 동작 끝나자마자 |
+| 동작 멈춤 감지 | 1.5초 | idle 상태 지속 시 문장화 트리거 |
+| AI API + SSE | 1~2초 | 네트워크 + 토큰 생성 |
+| **partial 지연** | **~0.3초** | 단어 하나 인식 후 즉시 표시 |
+| **final 지연** | **~1.5~2.5초** | 마지막 수어 후 문장화 완료까지 |
+
+> STT 자막 지연이 보통 1~2초인 것과 비교하면 비슷한 수준이다.
 
 ### STT와의 대칭
 
 | | STT (음성 → 자막) | 수화 (수어 → 자막) |
 |---|---|---|
 | 입력 | 마이크 오디오 | 카메라 랜드마크 |
-| 처리 | STT API (서버) | TF.js 분류 모델 (브라우저) |
-| partial | 중간 자막 (바뀔 수 있음) | 인식 중인 단어 (바뀔 수 있음) |
-| final | 확정 자막 | 3회 연속 인식으로 확정 |
+| 처리 (실시간) | STT API (서버) | TF.js LSTM (브라우저) |
+| 처리 (문장화) | STT가 자체 처리 | AI API (서버) |
+| partial | 중간 자막 (바뀔 수 있음) | 인식된 단어 (하나씩 추가) |
+| final | 확정 자막 | AI가 문장화한 확정 자막 |
 | 이벤트 | `caption:partial` / `caption:final` | `sign:partial` / `sign:final` |
 | 표시 | 자막 영역 | 동일한 자막 영역 |
 
@@ -284,72 +321,115 @@ signbridge-model 에서 학습 완료
 
 ---
 
-### Phase 4: WebSocket 연동 + 자막 통합
+### Phase 4: WebSocket 연동 + AI 문장화 + 자막 통합
 
-**목표**: 인식된 수어를 STT 자막과 동일한 흐름으로 상대방에게 전달
+**목표**: 단어 단위 partial 자막 + AI 문장화 final 자막을 STT와 동일한 흐름으로 전달
 
 **작업 목록**
 
-- [ ] WebSocket 이벤트 추가 (NestJS)
-  - `sign:partial` — 중간 인식 결과 브로드캐스트
-  - `sign:final` — 확정 인식 결과 브로드캐스트 + DB 저장
+- [ ] WebSocket 이벤트 연동 (이미 구현됨, 프론트엔드 리스너 추가)
+  - `sign:partial` — 단어 단위 중간 자막 브로드캐스트
+  - `sign:final` — AI 문장화된 확정 자막 브로드캐스트 + DB 저장
+- [ ] 단어 버퍼 + 동작 멈춤 감지 (프론트엔드)
+  - 인식된 단어를 버퍼에 축적
+  - 1.5초간 idle 상태 지속 시 문장화 요청 트리거
+  - 버퍼 초기화 후 다음 수어 대기
+- [ ] AI 문장화 API (NestJS)
+  - `POST /sign/compose` — 단어 배열 → AI API → 자연스러운 문장
+  - SSE 스트리밍으로 응답 (실시간 텍스트 생성)
+  - AI provider: OpenAI GPT / Claude API (adapter 패턴)
+  - 프롬프트: "다음 한국 수어 단어들을 자연스러운 한국어 문장으로 만들어줘: [도움, 필요, 감사]"
 - [ ] 자막 UI 통합
   - STT 자막과 수화 자막을 동일한 자막 패널에 표시
   - 소스 구분: 음성(🎤) / 수화(🤟)
-  - 시간순 정렬
-- [ ] (선택) 수화 자막 → TTS
-  - 인식된 수어 텍스트를 TTS로 음성 변환
+  - partial: 단어가 하나씩 추가되는 형태
+  - final: AI 문장화된 자연스러운 문장으로 교체
+- [ ] (선택) 문장화된 자막 → TTS
+  - final 자막을 TTS로 음성 변환
   - 비장애인에게 음성으로도 전달
 - [ ] 수화 모드 상태 공유
   - 상대방에게 "수화 모드 켜짐" 알림
-  - 상대방 화면에 수화 인식 중 표시
 
 **전체 데이터 흐름**
 
 ```
 [청각 장애인 브라우저]
   카메라 → MediaPipe → 랜드마크 → TF.js 분류
-    → "감사합니다" (partial, 87%)
-    → sign:partial 이벤트 → WebSocket → NestJS
 
-[NestJS]
-  → 상대방에게 sign:partial 브로드캐스트
+  1) 단어 인식 즉시 (partial)
+     → "도움" 인식 (0.3초)
+     → sign:partial { content: "도움" } → WebSocket → NestJS
+     → 상대방 자막: 🤟 도움
+
+  2) 다음 단어 인식 (partial)
+     → "필요" 인식
+     → sign:partial { content: "필요" } → WebSocket → NestJS
+     → 상대방 자막: 🤟 도움, 필요
+
+  3) 다음 단어 인식 (partial)
+     → "감사" 인식
+     → sign:partial { content: "감사" } → WebSocket → NestJS
+     → 상대방 자막: 🤟 도움, 필요, 감사
+
+  4) 동작 멈춤 (1.5초 idle 감지)
+     → 축적된 단어 ["도움", "필요", "감사"]
+     → POST /sign/compose → NestJS → AI API
+     → SSE 스트리밍: "도움이 필요합니다, 감사합니다"
+     → sign:final { content: "도움이 필요합니다, 감사합니다" }
 
 [비장애인 브라우저]
-  → 자막 영역: 🤟 감사합니다... (인식 중)
-
-[청각 장애인 브라우저]
-  → 3회 연속 인식 → "감사합니다" (final, 92%)
-  → sign:final 이벤트 → WebSocket → NestJS
-
-[NestJS]
-  → DB 저장 (CaptionEvent, source: 'sign')
-  → 상대방에게 sign:final 브로드캐스트
-
-[비장애인 브라우저]
-  → 자막 영역: 🤟 감사합니다 (확정)
+  → 자막 영역: 🤟 도움이 필요합니다, 감사합니다 (확정)
   → (선택) TTS 재생
+
+[NestJS]
+  → DB 저장 (MessageEvent, type: sign_intent)
+```
+
+**AI 문장화 API 설계**
+
+```
+POST /sign/compose
+Content-Type: application/json
+Accept: text/event-stream
+
+Request:
+{
+  "roomId": "room_xxx",
+  "words": ["도움", "필요", "감사"]
+}
+
+Response (SSE):
+data: 도움이
+data: 필요합니다,
+data: 감사합니다
+data: [DONE]
 ```
 
 ---
 
-## 6. WebSocket 이벤트
+## 6. WebSocket 이벤트 + REST API
 
-### Client → Server
+### WebSocket: Client → Server
 
-| 이벤트 | 설명 |
-|--------|------|
-| `sign:mode` | 수화 모드 ON/OFF 상태 변경 |
-| `sign:partial` | 중간 인식 결과 (partial 자막) |
-| `sign:final` | 확정 인식 결과 (final 자막) |
+| 이벤트 | 설명 | payload |
+|--------|------|---------|
+| `sign:mode` | 수화 모드 ON/OFF | `{ enabled }` |
+| `sign:partial` | 단어 단위 중간 자막 | `{ content, confidence }` |
+| `sign:final` | AI 문장화된 확정 자막 | `{ content, confidence }` |
 
-### Server → Client
+### WebSocket: Server → Client
 
 | 이벤트 | 설명 |
 |--------|------|
 | `sign:mode-changed` | 상대방 수화 모드 상태 알림 |
-| `sign:partial` | 중간 인식 자막 전달 |
-| `sign:final` | 확정 인식 자막 전달 |
+| `sign:partial` | 단어 단위 중간 자막 전달 |
+| `sign:final` | 문장화된 확정 자막 전달 |
+
+### REST API
+
+| 엔드포인트 | 설명 |
+|-----------|------|
+| `POST /sign/compose` | 단어 배열 → AI 문장화 (SSE 스트리밍 응답) |
 
 ---
 
@@ -380,6 +460,9 @@ signbridge-model 에서 학습 완료
 | 한국 수어 학습 데이터 부족 | 자체 수집 도구 만들어서 팀 내 수집, 데이터 증강 |
 | 사용자별 수어 동작 차이 | 좌표 정규화, 다양한 사람 데이터 수집 |
 | 모바일 성능 | 모바일에서는 추론 주기 낮추기 (매 15프레임) |
+| AI API 비용 | 문장화 요청은 동작 멈출 때만 발생 (빈도 낮음), 입력 토큰도 단어 몇 개 수준 |
+| AI API 지연 | SSE 스트리밍으로 체감 지연 최소화, partial 자막이 이미 나와있어 대기 부담 적음 |
+| AI API 장애 | fallback: 단어를 쉼표로 연결하여 그대로 표시 ("도움, 필요, 감사") |
 
 ---
 
@@ -390,7 +473,7 @@ signbridge-model 에서 학습 완료
 | 1 | Phase 1: 핸드 트래킹 | 수화 모드 버튼 + 손 랜드마크 시각화 |
 | 2 | Phase 3: 모델 학습 | 데이터 수집 + LSTM 모델 + TF.js 변환 |
 | 3 | Phase 2: 실시간 분류 | 슬라이딩 윈도우 + partial/final 자막 |
-| 4 | Phase 4: 연동 | WebSocket + 자막 통합 + (선택) TTS |
+| 4 | Phase 4: 연동 | WebSocket + AI 문장화 API + 자막 통합 |
 
 > Phase 3(모델)을 Phase 2보다 먼저 하는 이유: 분류 모델이 있어야 실시간 파이프라인을 테스트할 수 있다.
 > Phase 1은 모델 없이 독립적으로 바로 시작 가능.
