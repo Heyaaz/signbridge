@@ -8,3 +8,5 @@ coverage
 *.log
 backend/prisma/dev.db
 .idea
+
+.claude/
