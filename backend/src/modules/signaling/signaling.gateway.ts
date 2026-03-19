@@ -8,6 +8,7 @@ import {
   WebSocketServer
 } from "@nestjs/websockets";
 import { Server, Socket } from "socket.io";
+import { CallLogService } from "../call-log/call-log.service";
 import { RoomService } from "../room/room.service";
 
 interface JoinRoomPayload {
@@ -42,7 +43,10 @@ export class SignalingGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   private server!: Server;
 
-  constructor(private readonly roomService: RoomService) {}
+  constructor(
+    private readonly roomService: RoomService,
+    private readonly callLogService: CallLogService
+  ) {}
 
   async handleDisconnect(socket: Socket) {
     const roomId = socket.data.roomId as string | undefined;
@@ -53,6 +57,8 @@ export class SignalingGateway implements OnGatewayDisconnect {
     }
 
     await this.roomService.markParticipantConnection(roomId, sessionId, "disconnected");
+    await this.roomService.markParticipantLeft(roomId, sessionId);
+    await this.callLogService.createForRoom(roomId, "disconnect");
 
     socket.to(roomId).emit("room:user-left", {
       roomId,
@@ -240,6 +246,7 @@ export class SignalingGateway implements OnGatewayDisconnect {
     }
 
     await this.roomService.markParticipantLeft(payload.roomId, session.sessionId);
+    await this.callLogService.createForRoom(payload.roomId, "manual");
 
     this.server.to(payload.roomId).emit("call:ended", {
       roomId: payload.roomId,
