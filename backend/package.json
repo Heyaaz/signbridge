@@ -13,8 +13,8 @@
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {
-    "@nestjs/config": "^4.0.2",
     "@nestjs/common": "^11.0.11",
+    "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.11",
     "@nestjs/platform-express": "^11.0.11",
     "@nestjs/platform-socket.io": "^11.0.11",
@@ -27,6 +27,7 @@
     "@nestjs/cli": "^11.0.5",
     "@nestjs/schematics": "^11.0.1",
     "@nestjs/testing": "^11.0.11",
+    "@types/multer": "^2.1.0",
     "@types/node": "^22.13.0",
     "eslint": "^9.22.0",
     "prisma": "^6.5.0",
