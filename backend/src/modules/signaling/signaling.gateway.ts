@@ -209,32 +209,31 @@ export class SignalingGateway implements OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: CallEndPayload
   ) {
+    // socket.data.roomId 사용 — 클라이언트 payload.roomId를 신뢰하지 않는다
+    const roomId = socket.data.roomId as string | undefined;
+    const sessionId = socket.data.sessionId as string | undefined;
+
+    if (!roomId || !sessionId) {
+      return { ok: false, error: "방에 참여하지 않은 상태입니다" };
+    }
+
     try {
-      const session = await this.roomService.findSessionByToken(payload.sessionToken);
-
-      if (!session) {
-        return {
-          ok: false,
-          error: "Invalid session token"
-        };
-      }
-
-      const roomEnded = await this.roomService.markParticipantLeft(payload.roomId, session.sessionId);
+      const roomEnded = await this.roomService.markParticipantLeft(roomId, sessionId);
 
       if (roomEnded) {
-        await this.callLogService.createForRoom(payload.roomId, "manual");
+        await this.callLogService.createForRoom(roomId, "manual");
       }
 
-      this.server.to(payload.roomId).emit("call:ended", {
-        roomId: payload.roomId,
-        sessionId: session.sessionId
+      this.server.to(roomId).emit("call:ended", {
+        roomId,
+        sessionId
       });
 
       return {
         ok: true
       };
     } catch (error) {
-      this.logger.error(`endCall failed roomId=${payload.roomId}`, error);
+      this.logger.error(`endCall failed roomId=${roomId}`, error);
       return {
         ok: false,
         error: "Failed to end call"
@@ -247,6 +246,14 @@ export class SignalingGateway implements OnGatewayDisconnect {
     payload: MessagePayload,
     messageType: MessageType
   ) {
+    // socket.data.roomId/sessionId 사용 — 클라이언트 payload.roomId를 신뢰하지 않는다
+    const roomId = socket.data.roomId as string | undefined;
+    const sessionId = socket.data.sessionId as string | undefined;
+
+    if (!roomId || !sessionId) {
+      return { ok: false, error: "방에 참여하지 않은 상태입니다" };
+    }
+
     const content = payload?.content?.trim();
 
     if (!content || content.length > MAX_MESSAGE_LENGTH) {
@@ -256,27 +263,18 @@ export class SignalingGateway implements OnGatewayDisconnect {
       };
     }
 
-    const session = await this.roomService.findSessionByToken(payload.sessionToken);
-
-    if (!session) {
-      return {
-        ok: false,
-        error: "Invalid session token"
-      };
-    }
-
     const message = await this.roomService.createMessageEvent({
-      roomId: payload.roomId,
-      sessionId: session.sessionId,
+      roomId,
+      sessionId,
       content,
       messageType
     });
 
-    this.server.to(payload.roomId).emit("message:received", {
+    this.server.to(roomId).emit("message:received", {
       id: message.id,
-      roomId: payload.roomId,
-      sessionId: session.sessionId,
-      nickname: session.nickname,
+      roomId,
+      sessionId,
+      nickname: socket.data.nickname as string,
       content: message.content,
       messageType: message.messageType,
       createdAt: message.createdAt
