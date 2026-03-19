@@ -192,9 +192,9 @@ export class RoomService {
     });
   }
 
-  async markParticipantLeft(roomId: string, sessionId: string) {
-    await this.prismaService.$transaction(async (tx) => {
-      await tx.roomParticipant.updateMany({
+  async markParticipantLeft(roomId: string, sessionId: string): Promise<boolean> {
+    return this.prismaService.$transaction(async (tx) => {
+      const result = await tx.roomParticipant.updateMany({
         where: {
           roomId,
           sessionId,
@@ -206,6 +206,10 @@ export class RoomService {
         }
       });
 
+      if (result.count === 0) {
+        return false;
+      }
+
       const activeParticipants = await tx.roomParticipant.count({
         where: {
           roomId,
@@ -213,13 +217,17 @@ export class RoomService {
         }
       });
 
+      const roomEnded = activeParticipants === 0;
+
       await tx.room.update({
         where: { id: roomId },
         data: {
-          status: activeParticipants === 0 ? RoomStatus.ended : RoomStatus.waiting,
-          endedAt: activeParticipants === 0 ? new Date() : null
+          status: roomEnded ? RoomStatus.ended : RoomStatus.waiting,
+          endedAt: roomEnded ? new Date() : null
         }
       });
+
+      return roomEnded;
     });
   }
 
