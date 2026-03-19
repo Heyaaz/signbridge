@@ -9,6 +9,7 @@ import { HandOverlay } from "@/components/hand-tracking/hand-overlay";
 import { SignModeButton } from "@/components/hand-tracking/sign-mode-button";
 import { QuickRepliesPanel } from "@/components/quick-replies/quick-replies-panel";
 import { useHandTracking } from "@/hooks/use-hand-tracking";
+import { useSignClassifier } from "@/hooks/use-sign-classifier";
 import { useSpeechCaptions } from "@/hooks/use-speech-captions";
 import { useSocket } from "@/hooks/use-socket";
 import { useWebRtc } from "@/hooks/use-webrtc";
@@ -179,10 +180,39 @@ export function CallLayout({ roomId }: CallLayoutProps) {
 
   // 수화 모드: 로컬 비디오 위에 손 랜드마크 오버레이
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const { isSignMode, toggleSignMode, isHandDetected } = useHandTracking({
+  const { isSignMode, toggleSignMode, isHandDetected, landmarks } = useHandTracking({
     localVideoRef,
     canvasRef,
   });
+
+  // onPartial 중복 단어 emit 방지용 ref
+  const lastPartialWordRef = useRef<string | null>(null);
+
+  // 수화 분류기: 랜드마크 → 단어/문장 인식 → 소켓 emit
+  useSignClassifier({
+    landmarksRef: landmarks,
+    isSignMode,
+    onPartial: (word) => {
+      // 이전과 동일한 단어면 emit 생략 — 불필요한 네트워크 트래픽 방지
+      if (!socket || word === lastPartialWordRef.current) return;
+      lastPartialWordRef.current = word;
+      socket.emit("sign:partial", { content: word, confidence: 1.0 });
+    },
+    onFinal: (sentence) => {
+      lastPartialWordRef.current = null; // 문장 확정 시 중복 체크 초기화
+      if (!socket) return;
+      socket.emit("sign:final", { content: sentence, confidence: 1.0 });
+    },
+  });
+
+  // 수화 모드 ON/OFF 시 상대방에게 상태 전달
+  // prevIsSignModeRef로 이전 값과 비교 — socket 재연결 시 불필요한 emit 방지
+  const prevIsSignModeRef = useRef<boolean>(isSignMode);
+  useEffect(() => {
+    if (!socket || prevIsSignModeRef.current === isSignMode) return;
+    prevIsSignModeRef.current = isSignMode;
+    socket.emit("sign:mode", { enabled: isSignMode });
+  }, [isSignMode, socket]);
 
   async function playTts(content: string) {
     setTtsStatus("tts preparing");
