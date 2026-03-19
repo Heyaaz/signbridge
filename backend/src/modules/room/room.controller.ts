@@ -1,18 +1,18 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { RoomService } from "./room.service";
-import { CreateRoomBody, JoinRoomBody } from "./room.types";
+import { SessionDto } from "./dto/session.dto";
 
 @Controller("rooms")
 export class RoomController {
   constructor(private readonly roomService: RoomService) {}
 
   @Post()
-  createRoom(@Body() body: CreateRoomBody) {
+  createRoom(@Body() body: SessionDto) {
     return this.roomService.createRoom(body);
   }
 
   @Post(":roomId/join")
-  joinRoom(@Param("roomId") roomId: string, @Body() body: JoinRoomBody) {
+  joinRoom(@Param("roomId") roomId: string, @Body() body: SessionDto) {
     return this.roomService.joinRoom(roomId, body);
   }
 

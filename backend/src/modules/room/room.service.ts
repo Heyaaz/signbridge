@@ -3,22 +3,17 @@ import {
   Injectable,
   NotFoundException
 } from "@nestjs/common";
-import { MessageType, Prisma, Role, RoomStatus } from "@prisma/client";
+import { MessageType, Prisma, RoomStatus } from "@prisma/client";
 import { randomBytes } from "node:crypto";
 import { PrismaService } from "../../infra/prisma/prisma.service";
-import {
-  CreateRoomBody,
-  JoinRoomBody,
-  RoomSummary,
-  SessionSummary
-} from "./room.types";
+import { SessionDto } from "./dto/session.dto";
+import { RoomSummary, SessionSummary } from "./room.types";
 
 @Injectable()
 export class RoomService {
   constructor(private readonly prismaService: PrismaService) {}
 
-  async createRoom(payload: CreateRoomBody) {
-    const validPayload = this.validateSessionPayload(payload);
+  async createRoom(payload: SessionDto) {
     const inviteCode = await this.createUniqueInviteCode();
 
     const result = await this.prismaService.$transaction(async (tx) => {
@@ -30,8 +25,8 @@ export class RoomService {
 
       const session = await tx.userSession.create({
         data: {
-          nickname: validPayload.nickname,
-          role: validPayload.role,
+          nickname: payload.nickname,
+          role: payload.role,
           sessionToken: this.createSessionToken()
         }
       });
@@ -55,34 +50,35 @@ export class RoomService {
     };
   }
 
-  async joinRoom(roomId: string, payload: JoinRoomBody) {
-    const validPayload = this.validateSessionPayload(payload);
-    const room = await this.prismaService.room.findUnique({
-      where: { id: roomId },
-      include: {
-        participants: {
-          where: { leftAt: null }
-        }
-      }
-    });
-
-    if (!room) {
-      throw new NotFoundException("Room not found");
-    }
-
-    if (room.status === RoomStatus.ended) {
-      throw new BadRequestException("Ended room cannot be joined");
-    }
-
-    if (room.participants.length >= 2) {
-      throw new BadRequestException("Room is full");
-    }
-
+  async joinRoom(roomId: string, payload: SessionDto) {
+    // 방 조회, 참가자 수 체크, 세션/참가자 생성을 모두 하나의 트랜잭션으로 묶어
+    // 동시 접속 시 "방 정원 초과" 레이스 컨디션을 방지한다
     const result = await this.prismaService.$transaction(async (tx) => {
+      const room = await tx.room.findUnique({
+        where: { id: roomId },
+        include: {
+          participants: {
+            where: { leftAt: null }
+          }
+        }
+      });
+
+      if (!room) {
+        throw new NotFoundException("Room not found");
+      }
+
+      if (room.status === RoomStatus.ended) {
+        throw new BadRequestException("Ended room cannot be joined");
+      }
+
+      if (room.participants.length >= 2) {
+        throw new BadRequestException("Room is full");
+      }
+
       const session = await tx.userSession.create({
         data: {
-          nickname: validPayload.nickname,
-          role: validPayload.role,
+          nickname: payload.nickname,
+          role: payload.role,
           sessionToken: this.createSessionToken()
         }
       });
@@ -255,25 +251,6 @@ export class RoomService {
     });
 
     return message;
-  }
-
-  private validateSessionPayload(payload: CreateRoomBody | JoinRoomBody) {
-    if (!payload || typeof payload.nickname !== "string" || payload.nickname.trim().length < 2) {
-      throw new BadRequestException("Nickname must be at least 2 characters");
-    }
-
-    if (!this.isRole(payload.role)) {
-      throw new BadRequestException("Role must be speaker, deaf, or guest");
-    }
-
-    return {
-      nickname: payload.nickname.trim().slice(0, 20),
-      role: payload.role
-    };
-  }
-
-  private isRole(role: unknown): role is Role {
-    return role === Role.deaf || role === Role.speaker || role === Role.guest;
   }
 
   private async createUniqueInviteCode() {
