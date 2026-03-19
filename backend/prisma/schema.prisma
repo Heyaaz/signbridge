@@ -96,13 +96,11 @@ model MessageEvent {
 
 model CallLog {
   id           String   @id @default(cuid())
-  roomId       String
+  roomId       String   @unique
   durationSec  Int      @default(0)
   captionCount Int      @default(0)
   messageCount Int      @default(0)
   endReason    String?
   createdAt    DateTime @default(now())
   room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
-
-  @@index([roomId])
 }
