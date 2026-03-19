@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Socket } from "socket.io-client";
+import { createSttTranscript } from "@/lib/api";
 
 interface SpeechRecognitionAlternativeLike {
   transcript: string;
@@ -52,6 +53,8 @@ export function useSpeechCaptions({
   const lastPartialRef = useRef("");
   const [status, setStatus] = useState("stt idle");
   const [supported, setSupported] = useState(true);
+  const serverSttActiveRef = useRef(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 
   useEffect(() => {
     latestSocketRef.current = socket;
@@ -68,7 +71,7 @@ export function useSpeechCaptions({
 
     if (!Recognition) {
       setSupported(false);
-      setStatus("stt unsupported");
+      setStatus("stt server");
       return;
     }
 
@@ -154,6 +157,70 @@ export function useSpeechCaptions({
       recognitionRef.current = null;
     };
   }, [enabled, lang, socket]);
+
+  // Server STT fallback: MediaRecorder → POST /stt → caption:final
+  useEffect(() => {
+    if (supported) {
+      return;
+    }
+
+    if (!enabled || !socket) {
+      serverSttActiveRef.current = false;
+      mediaRecorderRef.current?.stop();
+      mediaRecorderRef.current = null;
+      setStatus("stt idle");
+      return;
+    }
+
+    serverSttActiveRef.current = true;
+    let stream: MediaStream | null = null;
+
+    async function startServerStt() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm";
+
+        const recorder = new MediaRecorder(stream, { mimeType });
+        mediaRecorderRef.current = recorder;
+
+        recorder.ondataavailable = async (event) => {
+          if (!serverSttActiveRef.current || event.data.size === 0) {
+            return;
+          }
+
+          const audioBlob = new Blob([event.data], { type: mimeType });
+
+          try {
+            const result = await createSttTranscript(audioBlob, lang);
+            if (result.text) {
+              latestSocketRef.current?.emit("caption:final", { content: result.text });
+            }
+          } catch {
+            // ignore individual chunk errors
+          }
+        };
+
+        recorder.start(5000); // fire ondataavailable every 5 seconds
+        setStatus("stt server listening");
+      } catch {
+        setStatus("stt server error");
+      }
+    }
+
+    void startServerStt();
+
+    return () => {
+      serverSttActiveRef.current = false;
+      if (mediaRecorderRef.current?.state === "recording") {
+        mediaRecorderRef.current.stop();
+      }
+      mediaRecorderRef.current = null;
+      stream?.getTracks().forEach((track) => track.stop());
+    };
+  }, [supported, enabled, lang, socket]);
 
   return {
     supported,
