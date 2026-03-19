@@ -13,3 +13,4 @@ training/venv
 training/output
 
 .claude/
+.claude-octopus/
