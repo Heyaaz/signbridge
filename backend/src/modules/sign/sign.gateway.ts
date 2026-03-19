@@ -21,9 +21,12 @@ interface SignRecognitionPayload {
   confidence: number;
 }
 
+/** content 최대 길이 (단어 연결 문자열 기준) */
+const MAX_CONTENT_LENGTH = 500;
+
 @WebSocketGateway({
   cors: {
-    origin: "*"
+    origin: process.env.CORS_ORIGIN ?? "*"
   }
 })
 export class SignGateway implements OnGatewayDisconnect {
@@ -37,14 +40,16 @@ export class SignGateway implements OnGatewayDisconnect {
    */
   handleDisconnect(socket: Socket) {
     const roomId = socket.data.roomId as string | undefined;
+    const sessionId = socket.data.sessionId as string | undefined;
 
-    if (!roomId) {
+    // roomId 또는 sessionId가 없으면 방에 참여하지 않은 소켓이므로 무시
+    if (!roomId || !sessionId) {
       return;
     }
 
     socket.to(roomId).emit("sign:mode-changed", {
       roomId,
-      fromSessionId: socket.data.sessionId as string | undefined,
+      fromSessionId: sessionId,
       enabled: false
     });
   }
@@ -94,6 +99,14 @@ export class SignGateway implements OnGatewayDisconnect {
       return { ok: false, error: "방에 참여하지 않은 상태입니다" };
     }
 
+    // payload 유효성 검사
+    if (typeof payload.content !== "string" || payload.content.length === 0) {
+      return { ok: false, error: "content가 유효하지 않습니다" };
+    }
+    if (payload.content.length > MAX_CONTENT_LENGTH) {
+      return { ok: false, error: "content가 너무 깁니다" };
+    }
+
     this.emitToPeers(socket, roomId, "sign:partial", {
       roomId,
       fromSessionId: sessionId,
@@ -106,10 +119,11 @@ export class SignGateway implements OnGatewayDisconnect {
 
   /**
    * 확정 인식 결과 브로드캐스트
-   * 인식이 완료된 최종 결과를 상대방에게 전달하고 DB에 저장한다
+   * 브로드캐스트를 먼저 수행하고, DB 저장은 fire-and-forget으로 처리한다.
+   * DB 저장 실패가 실시간 전달을 차단하지 않도록 한다.
    */
   @SubscribeMessage("sign:final")
-  async handleSignFinal(
+  handleSignFinal(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: SignRecognitionPayload
   ) {
@@ -121,19 +135,28 @@ export class SignGateway implements OnGatewayDisconnect {
       return { ok: false, error: "방에 참여하지 않은 상태입니다" };
     }
 
+    // payload 유효성 검사
+    if (typeof payload.content !== "string" || payload.content.length === 0) {
+      return { ok: false, error: "content가 유효하지 않습니다" };
+    }
+    if (payload.content.length > MAX_CONTENT_LENGTH) {
+      return { ok: false, error: "content가 너무 깁니다" };
+    }
+
     this.logger.log(`수화 인식 확정: room=${roomId}, content=${payload.content}`);
 
-    // TODO: 확정 인식 결과를 DB에 저장 (sign.service의 saveSignCaption 구현 필요)
-    // await this.signService.saveSignCaption({
-    //   roomId,
-    //   sessionId,
-    //   content: payload.content,
-    //   confidence: payload.confidence
-    // });
-
+    // 브로드캐스트 먼저 — DB 저장 실패가 실시간 전달을 차단하지 않도록
     this.emitToPeers(socket, roomId, "sign:final", {
       roomId,
       fromSessionId: sessionId,
+      content: payload.content,
+      confidence: payload.confidence
+    });
+
+    // DB 저장은 fire-and-forget — 실패 시 SignService 내부에서 로깅
+    void this.signService.saveSignCaption({
+      roomId,
+      sessionId,
       content: payload.content,
       confidence: payload.confidence
     });
