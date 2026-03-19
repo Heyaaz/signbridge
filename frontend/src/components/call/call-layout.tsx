@@ -162,6 +162,7 @@ export function CallLayout({ roomId }: CallLayoutProps) {
   const { localVideoRef, remoteVideoRef, mediaStatus } = useWebRtc({
     roomId,
     sessionId: session?.sessionId ?? "",
+    sessionToken: session?.sessionToken ?? "",
     socket,
     participantCount: room?.participants.length ?? 0,
     shouldCreateOffer

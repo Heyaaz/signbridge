@@ -1,5 +1,6 @@
 import {
   CreateRoomResponse,
+  IceServersResponse,
   JoinRoomResponse,
   Role,
   RoomSummary,
@@ -59,6 +60,12 @@ export async function getRoom(roomId: string) {
 
 export async function getQuickReplies() {
   return request<string[]>("/quick-replies");
+}
+
+export async function getIceServers(sessionToken: string) {
+  return request<IceServersResponse>("/ice-servers", {
+    headers: { "x-session-token": sessionToken }
+  });
 }
 
 export async function createTtsAudio(payload: { text: string; lang?: string }) {

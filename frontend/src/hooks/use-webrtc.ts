@@ -1,9 +1,10 @@
 "use client";
 
-import { RefObject, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Socket } from "socket.io-client";
+import { getIceServers } from "@/lib/api";
 
-const RTC_CONFIGURATION: RTCConfiguration = {
+const FALLBACK_RTC_CONFIGURATION: RTCConfiguration = {
   iceServers: [
     {
       urls: ["stun:stun.l.google.com:19302"]
@@ -11,9 +12,20 @@ const RTC_CONFIGURATION: RTCConfiguration = {
   ]
 };
 
+async function fetchRtcConfiguration(sessionToken: string): Promise<RTCConfiguration> {
+  try {
+    const { iceServers } = await getIceServers(sessionToken);
+    return { iceServers };
+  } catch {
+    console.warn("[WebRTC] Failed to fetch ICE servers, using STUN fallback");
+    return FALLBACK_RTC_CONFIGURATION;
+  }
+}
+
 interface UseWebRtcOptions {
   roomId: string;
   sessionId: string;
+  sessionToken: string;
   socket: Socket | null;
   participantCount: number;
   shouldCreateOffer: boolean;
@@ -22,6 +34,7 @@ interface UseWebRtcOptions {
 export function useWebRtc({
   roomId,
   sessionId,
+  sessionToken,
   socket,
   participantCount,
   shouldCreateOffer
@@ -40,10 +53,10 @@ export function useWebRtc({
 
     async function prepareMedia() {
       try {
-        const localStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: true
-        });
+        const [localStream, rtcConfiguration] = await Promise.all([
+          navigator.mediaDevices.getUserMedia({ audio: true, video: true }),
+          fetchRtcConfiguration(sessionToken)
+        ]);
 
         if (!mounted) {
           localStream.getTracks().forEach((track) => track.stop());
@@ -56,7 +69,7 @@ export function useWebRtc({
           localVideoRef.current.srcObject = localStream;
         }
 
-        const peerConnection = new RTCPeerConnection(RTC_CONFIGURATION);
+        const peerConnection = new RTCPeerConnection(rtcConfiguration);
         peerConnectionRef.current = peerConnection;
         setPeerReady(true);
 
@@ -101,8 +114,10 @@ export function useWebRtc({
       setPeerReady(false);
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       peerConnectionRef.current?.close();
+      localStreamRef.current = null;
+      peerConnectionRef.current = null;
     };
-  }, [roomId, socket]);
+  }, [roomId, sessionToken, socket]);
 
   useEffect(() => {
     if (!socket || !peerConnectionRef.current || !peerReady) {
@@ -112,22 +127,27 @@ export function useWebRtc({
     const activeSocket = socket;
 
     async function handleOffer(payload: { sdp: RTCSessionDescriptionInit }) {
-      await peerConnectionRef.current?.setRemoteDescription(payload.sdp);
-      const answer = await peerConnectionRef.current?.createAnswer();
+      try {
+        await peerConnectionRef.current?.setRemoteDescription(payload.sdp);
+        const answer = await peerConnectionRef.current?.createAnswer();
 
-      if (!answer) {
-        return;
+        if (!answer) {
+          return;
+        }
+
+        await peerConnectionRef.current?.setLocalDescription(answer);
+        activeSocket.emit("webrtc:answer", { roomId, sdp: answer });
+      } catch (error) {
+        console.error("[WebRTC] handleOffer failed", error);
       }
-
-      await peerConnectionRef.current?.setLocalDescription(answer);
-      activeSocket.emit("webrtc:answer", {
-        roomId,
-        sdp: answer
-      });
     }
 
     async function handleAnswer(payload: { sdp: RTCSessionDescriptionInit }) {
-      await peerConnectionRef.current?.setRemoteDescription(payload.sdp);
+      try {
+        await peerConnectionRef.current?.setRemoteDescription(payload.sdp);
+      } catch (error) {
+        console.error("[WebRTC] handleAnswer failed", error);
+      }
     }
 
     async function handleIceCandidate(payload: { candidate: RTCIceCandidateInit }) {
@@ -135,7 +155,11 @@ export function useWebRtc({
         return;
       }
 
-      await peerConnectionRef.current?.addIceCandidate(payload.candidate);
+      try {
+        await peerConnectionRef.current?.addIceCandidate(payload.candidate);
+      } catch (error) {
+        console.error("[WebRTC] handleIceCandidate failed", error);
+      }
     }
 
     activeSocket.on("webrtc:offer", handleOffer);
@@ -167,13 +191,15 @@ export function useWebRtc({
 
       offerCreatedRef.current = true;
 
-      const offer = await peerConnectionRef.current.createOffer();
-      await peerConnectionRef.current.setLocalDescription(offer);
+      try {
+        const offer = await peerConnectionRef.current.createOffer();
+        await peerConnectionRef.current.setLocalDescription(offer);
 
-      socket.emit("webrtc:offer", {
-        roomId,
-        sdp: offer
-      });
+        socket.emit("webrtc:offer", { roomId, sdp: offer });
+      } catch (error) {
+        console.error("[WebRTC] createOffer failed", error);
+        offerCreatedRef.current = false;
+      }
     }
 
     void createOffer();
