@@ -8,6 +8,7 @@ import { QuickReplyModule } from "./modules/quick-reply/quick-reply.module";
 import { RoomModule } from "./modules/room/room.module";
 import { SignalingModule } from "./modules/signaling/signaling.module";
 import { SignModule } from "./modules/sign/sign.module";
+import { SttModule } from "./modules/stt/stt.module";
 import { TtsModule } from "./modules/tts/tts.module";
 
 @Module({
@@ -21,6 +22,7 @@ import { TtsModule } from "./modules/tts/tts.module";
     SignalingModule,
     SignModule,
     CaptionModule,
+    SttModule,
     TtsModule,
     QuickReplyModule
   ],
