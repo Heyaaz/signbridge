@@ -1,4 +1,5 @@
 import { MessageType } from "@prisma/client";
+import { Logger } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -10,6 +11,8 @@ import {
 import { Server, Socket } from "socket.io";
 import { CallLogService } from "../call-log/call-log.service";
 import { RoomService } from "../room/room.service";
+
+const MAX_MESSAGE_LENGTH = 500;
 
 interface JoinRoomPayload {
   roomId: string;
@@ -36,12 +39,14 @@ interface CallEndPayload {
 
 @WebSocketGateway({
   cors: {
-    origin: "*"
+    origin: process.env.CORS_ORIGIN ?? "*"
   }
 })
 export class SignalingGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   private server!: Server;
+
+  private readonly logger = new Logger(SignalingGateway.name);
 
   constructor(
     private readonly roomService: RoomService,
@@ -56,14 +61,21 @@ export class SignalingGateway implements OnGatewayDisconnect {
       return;
     }
 
-    await this.roomService.markParticipantConnection(roomId, sessionId, "disconnected");
-    await this.roomService.markParticipantLeft(roomId, sessionId);
-    await this.callLogService.createForRoom(roomId, "disconnect");
+    try {
+      await this.roomService.markParticipantConnection(roomId, sessionId, "disconnected");
+      const roomEnded = await this.roomService.markParticipantLeft(roomId, sessionId);
 
-    socket.to(roomId).emit("room:user-left", {
-      roomId,
-      sessionId
-    });
+      if (roomEnded) {
+        await this.callLogService.createForRoom(roomId, "disconnect");
+      }
+
+      socket.to(roomId).emit("room:user-left", {
+        roomId,
+        sessionId
+      });
+    } catch (error) {
+      this.logger.error(`handleDisconnect failed roomId=${roomId} sessionId=${sessionId}`, error);
+    }
   }
 
   @SubscribeMessage("room:join")
@@ -71,61 +83,72 @@ export class SignalingGateway implements OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: JoinRoomPayload
   ) {
-    const room = await this.roomService.getRoom(payload.roomId);
-    const session = await this.roomService.findSessionByToken(payload.sessionToken);
+    try {
+      const room = await this.roomService.getRoom(payload.roomId);
+      const session = await this.roomService.findSessionByToken(payload.sessionToken);
 
-    if (!session) {
-      return {
-        ok: false,
-        error: "Invalid session token"
-      };
-    }
-
-    const isParticipant = room.participants.some(
-      (participant) => participant.sessionId === session.sessionId
-    );
-
-    if (!isParticipant) {
-      return {
-        ok: false,
-        error: "Session is not part of the room"
-      };
-    }
-
-    socket.data.roomId = payload.roomId;
-    socket.data.sessionId = session.sessionId;
-    socket.data.nickname = session.nickname;
-    socket.data.role = session.role;
-
-    await socket.join(payload.roomId);
-    await this.roomService.markParticipantConnection(
-      payload.roomId,
-      session.sessionId,
-      "connected"
-    );
-
-    socket.to(payload.roomId).emit("room:user-joined", {
-      roomId: payload.roomId,
-      participant: {
-        sessionId: session.sessionId,
-        nickname: session.nickname,
-        role: session.role
+      if (!session) {
+        return {
+          ok: false,
+          error: "Invalid session token"
+        };
       }
-    });
 
-    return {
-      ok: true,
-      roomId: payload.roomId,
-      sessionId: session.sessionId,
-      participants: room.participants
-    };
+      const isParticipant = room.participants.some(
+        (participant) => participant.sessionId === session.sessionId
+      );
+
+      if (!isParticipant) {
+        return {
+          ok: false,
+          error: "Session is not part of the room"
+        };
+      }
+
+      socket.data.roomId = payload.roomId;
+      socket.data.sessionId = session.sessionId;
+      socket.data.nickname = session.nickname;
+      socket.data.role = session.role;
+
+      await socket.join(payload.roomId);
+      await this.roomService.markParticipantConnection(
+        payload.roomId,
+        session.sessionId,
+        "connected"
+      );
+
+      socket.to(payload.roomId).emit("room:user-joined", {
+        roomId: payload.roomId,
+        participant: {
+          sessionId: session.sessionId,
+          nickname: session.nickname,
+          role: session.role
+        }
+      });
+
+      return {
+        ok: true,
+        roomId: payload.roomId,
+        sessionId: session.sessionId,
+        participants: room.participants
+      };
+    } catch {
+      return {
+        ok: false,
+        error: "Failed to join room"
+      };
+    }
   }
 
   @SubscribeMessage("webrtc:offer")
-  async relayOffer(
+  relayOffer(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: SignalRelayPayload
   ) {
+    if (!this.isValidRoomPayload(socket, payload.roomId)) {
+      return;
+    }
+
     this.emitToPeers(socket, payload.roomId, "webrtc:offer", {
       roomId: payload.roomId,
       fromSessionId: socket.data.sessionId,
@@ -134,10 +157,14 @@ export class SignalingGateway implements OnGatewayDisconnect {
   }
 
   @SubscribeMessage("webrtc:answer")
-  async relayAnswer(
+  relayAnswer(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: SignalRelayPayload
   ) {
+    if (!this.isValidRoomPayload(socket, payload.roomId)) {
+      return;
+    }
+
     this.emitToPeers(socket, payload.roomId, "webrtc:answer", {
       roomId: payload.roomId,
       fromSessionId: socket.data.sessionId,
@@ -146,10 +173,14 @@ export class SignalingGateway implements OnGatewayDisconnect {
   }
 
   @SubscribeMessage("webrtc:ice-candidate")
-  async relayIceCandidate(
+  relayIceCandidate(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: SignalRelayPayload
   ) {
+    if (!this.isValidRoomPayload(socket, payload.roomId)) {
+      return;
+    }
+
     this.emitToPeers(socket, payload.roomId, "webrtc:ice-candidate", {
       roomId: payload.roomId,
       fromSessionId: socket.data.sessionId,
@@ -158,40 +189,11 @@ export class SignalingGateway implements OnGatewayDisconnect {
   }
 
   @SubscribeMessage("message:text")
-  async sendTextMessage(
+  async sendMessage(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: MessagePayload
   ) {
-    const session = await this.roomService.findSessionByToken(payload.sessionToken);
-
-    if (!session) {
-      return {
-        ok: false,
-        error: "Invalid session token"
-      };
-    }
-
-    const message = await this.roomService.createMessageEvent({
-      roomId: payload.roomId,
-      sessionId: session.sessionId,
-      content: payload.content,
-      messageType: MessageType.text
-    });
-
-    this.server.to(payload.roomId).emit("message:received", {
-      id: message.id,
-      roomId: payload.roomId,
-      sessionId: session.sessionId,
-      nickname: session.nickname,
-      content: message.content,
-      messageType: message.messageType,
-      createdAt: message.createdAt
-    });
-
-    return {
-      ok: true,
-      messageId: message.id
-    };
+    return this.handleMessage(socket, payload, MessageType.text);
   }
 
   @SubscribeMessage("message:quick-reply")
@@ -199,6 +201,61 @@ export class SignalingGateway implements OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: MessagePayload
   ) {
+    return this.handleMessage(socket, payload, MessageType.quick_reply);
+  }
+
+  @SubscribeMessage("call:end")
+  async endCall(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: CallEndPayload
+  ) {
+    try {
+      const session = await this.roomService.findSessionByToken(payload.sessionToken);
+
+      if (!session) {
+        return {
+          ok: false,
+          error: "Invalid session token"
+        };
+      }
+
+      const roomEnded = await this.roomService.markParticipantLeft(payload.roomId, session.sessionId);
+
+      if (roomEnded) {
+        await this.callLogService.createForRoom(payload.roomId, "manual");
+      }
+
+      this.server.to(payload.roomId).emit("call:ended", {
+        roomId: payload.roomId,
+        sessionId: session.sessionId
+      });
+
+      return {
+        ok: true
+      };
+    } catch (error) {
+      this.logger.error(`endCall failed roomId=${payload.roomId}`, error);
+      return {
+        ok: false,
+        error: "Failed to end call"
+      };
+    }
+  }
+
+  private async handleMessage(
+    socket: Socket,
+    payload: MessagePayload,
+    messageType: MessageType
+  ) {
+    const content = payload?.content?.trim();
+
+    if (!content || content.length > MAX_MESSAGE_LENGTH) {
+      return {
+        ok: false,
+        error: `Message must be 1–${MAX_MESSAGE_LENGTH} characters`
+      };
+    }
+
     const session = await this.roomService.findSessionByToken(payload.sessionToken);
 
     if (!session) {
@@ -211,8 +268,8 @@ export class SignalingGateway implements OnGatewayDisconnect {
     const message = await this.roomService.createMessageEvent({
       roomId: payload.roomId,
       sessionId: session.sessionId,
-      content: payload.content,
-      messageType: MessageType.quick_reply
+      content,
+      messageType
     });
 
     this.server.to(payload.roomId).emit("message:received", {
@@ -231,31 +288,8 @@ export class SignalingGateway implements OnGatewayDisconnect {
     };
   }
 
-  @SubscribeMessage("call:end")
-  async endCall(
-    @ConnectedSocket() socket: Socket,
-    @MessageBody() payload: CallEndPayload
-  ) {
-    const session = await this.roomService.findSessionByToken(payload.sessionToken);
-
-    if (!session) {
-      return {
-        ok: false,
-        error: "Invalid session token"
-      };
-    }
-
-    await this.roomService.markParticipantLeft(payload.roomId, session.sessionId);
-    await this.callLogService.createForRoom(payload.roomId, "manual");
-
-    this.server.to(payload.roomId).emit("call:ended", {
-      roomId: payload.roomId,
-      sessionId: session.sessionId
-    });
-
-    return {
-      ok: true
-    };
+  private isValidRoomPayload(socket: Socket, roomId: string): boolean {
+    return Boolean(roomId) && socket.data.roomId === roomId;
   }
 
   private emitToPeers(
@@ -264,10 +298,6 @@ export class SignalingGateway implements OnGatewayDisconnect {
     event: string,
     payload: Record<string, unknown>
   ) {
-    if (!roomId) {
-      return;
-    }
-
     socket.to(roomId).emit(event, payload);
   }
 }
