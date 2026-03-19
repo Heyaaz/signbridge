@@ -67,3 +67,24 @@ export async function createTtsAudio(payload: { text: string; lang?: string }) {
     body: JSON.stringify(payload)
   });
 }
+
+export async function createSttTranscript(
+  audioBlob: Blob,
+  lang?: string
+): Promise<{ ok: boolean; provider: string; text: string }> {
+  const form = new FormData();
+  form.append("audio", audioBlob, "audio.webm");
+
+  const langParam = lang ? `?lang=${encodeURIComponent(lang)}` : "";
+  const response = await fetch(`${API_BASE_URL}/stt${langParam}`, {
+    method: "POST",
+    body: form,
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`STT request failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<{ ok: boolean; provider: string; text: string }>;
+}
