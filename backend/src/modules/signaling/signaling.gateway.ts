@@ -84,8 +84,10 @@ export class SignalingGateway implements OnGatewayDisconnect {
     @MessageBody() payload: JoinRoomPayload
   ) {
     try {
-      const room = await this.roomService.getRoom(payload.roomId);
-      const session = await this.roomService.findSessionByToken(payload.sessionToken);
+      const [room, session] = await Promise.all([
+        this.roomService.getRoom(payload.roomId),
+        this.roomService.findSessionByToken(payload.sessionToken)
+      ]);
 
       if (!session) {
         return {

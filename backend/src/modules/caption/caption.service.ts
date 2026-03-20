@@ -16,22 +16,17 @@ export class CaptionService {
       throw new BadRequestException("Caption content is required");
     }
 
-    const room = await this.prismaService.room.findUnique({
-      where: { id: input.roomId }
-    });
+    const [room, aggregate] = await Promise.all([
+      this.prismaService.room.findUnique({ where: { id: input.roomId } }),
+      this.prismaService.captionEvent.aggregate({
+        where: { roomId: input.roomId },
+        _max: { sequence: true }
+      })
+    ]);
 
     if (!room) {
       throw new NotFoundException("Room not found");
     }
-
-    const aggregate = await this.prismaService.captionEvent.aggregate({
-      where: {
-        roomId: input.roomId
-      },
-      _max: {
-        sequence: true
-      }
-    });
 
     return this.prismaService.captionEvent.create({
       data: {
