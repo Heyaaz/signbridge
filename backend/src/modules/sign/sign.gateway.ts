@@ -63,8 +63,8 @@ export class SignGateway implements OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: SignModePayload
   ) {
-    const roomId = socket.data.roomId as string;
-    const sessionId = socket.data.sessionId as string;
+    const roomId = socket.data.roomId as string | undefined;
+    const sessionId = socket.data.sessionId as string | undefined;
 
     // 방에 참여하지 않은 소켓은 처리하지 않음
     if (!roomId || !sessionId) {
@@ -91,8 +91,8 @@ export class SignGateway implements OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: SignRecognitionPayload
   ) {
-    const roomId = socket.data.roomId as string;
-    const sessionId = socket.data.sessionId as string;
+    const roomId = socket.data.roomId as string | undefined;
+    const sessionId = socket.data.sessionId as string | undefined;
 
     // 방에 참여하지 않은 소켓은 처리하지 않음
     if (!roomId || !sessionId) {
@@ -127,8 +127,8 @@ export class SignGateway implements OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: SignRecognitionPayload
   ) {
-    const roomId = socket.data.roomId as string;
-    const sessionId = socket.data.sessionId as string;
+    const roomId = socket.data.roomId as string | undefined;
+    const sessionId = socket.data.sessionId as string | undefined;
 
     // 방에 참여하지 않은 소켓은 처리하지 않음
     if (!roomId || !sessionId) {

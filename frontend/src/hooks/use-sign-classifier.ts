@@ -191,6 +191,8 @@ export function useSignClassifier({
       if (result) {
         handleClassifyResult(result.label, result.confidence);
       }
+    }).catch(() => {
+      isInferringRef.current = false;
     });
   }, [landmarksRef, handednessRef, handleClassifyResult]);
 
