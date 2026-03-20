@@ -7,6 +7,7 @@ import {
   Logger
 } from "@nestjs/common";
 import { Request, Response } from "express";
+import { PRISMA_ERROR } from "../prisma/prisma-errors";
 
 /**
  * 전역 예외 필터
@@ -57,7 +58,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     } else if (exception instanceof Error) {
       const prismaCode = (exception as unknown as Record<string, unknown>).code;
 
-      if (prismaCode === "P2025") {
+      if (prismaCode === PRISMA_ERROR.NOT_FOUND) {
         // Prisma: 조회 대상 레코드 없음
         status = HttpStatus.NOT_FOUND;
         message = "Resource not found";

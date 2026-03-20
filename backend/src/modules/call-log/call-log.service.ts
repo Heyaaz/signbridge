@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { RoomStatus } from "@prisma/client";
+import { PRISMA_ERROR } from "../../infra/prisma/prisma-errors";
 import { PrismaService } from "../../infra/prisma/prisma.service";
 
 export type EndReason = "manual" | "disconnect";
@@ -43,7 +44,7 @@ export class CallLogService {
         typeof error === "object" &&
         error !== null &&
         "code" in error &&
-        (error as { code: string }).code === "P2002"
+        (error as { code: string }).code === PRISMA_ERROR.UNIQUE_CONSTRAINT
       ) {
         return;
       }
