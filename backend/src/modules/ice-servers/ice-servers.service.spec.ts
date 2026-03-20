@@ -1,17 +1,6 @@
-import { Test } from "@nestjs/testing";
 import { IceServersService } from "./ice-servers.service";
 
 describe("IceServersService", () => {
-  let service: IceServersService;
-
-  beforeEach(async () => {
-    const module = await Test.createTestingModule({
-      providers: [IceServersService]
-    }).compile();
-
-    service = module.get(IceServersService);
-  });
-
   afterEach(() => {
     delete process.env.TURN_URLS;
     delete process.env.TURN_USERNAME;
@@ -19,6 +8,7 @@ describe("IceServersService", () => {
   });
 
   it("TURN 환경변수 없으면 STUN만 반환한다", () => {
+    const service = new IceServersService();
     const { iceServers } = service.getIceServers();
 
     expect(iceServers).toHaveLength(1);
@@ -31,6 +21,7 @@ describe("IceServersService", () => {
     process.env.TURN_USERNAME = "user";
     process.env.TURN_CREDENTIAL = "secret";
 
+    const service = new IceServersService();
     const { iceServers } = service.getIceServers();
 
     expect(iceServers).toHaveLength(2);
@@ -45,6 +36,7 @@ describe("IceServersService", () => {
   it("TURN_URLS만 있고 credential이 없으면 STUN만 반환한다", () => {
     process.env.TURN_URLS = "turn:turn.example.com:3478";
 
+    const service = new IceServersService();
     const { iceServers } = service.getIceServers();
 
     expect(iceServers).toHaveLength(1);

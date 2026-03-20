@@ -16,7 +16,18 @@ const DEFAULT_STUN: IceServer = {
 
 @Injectable()
 export class IceServersService {
+  // 환경 변수는 앱 시작 후 변하지 않으므로 초기화 시 한 번만 파싱
+  private readonly cachedResponse: IceServersResponse;
+
+  constructor() {
+    this.cachedResponse = this.buildIceServers();
+  }
+
   getIceServers(): IceServersResponse {
+    return this.cachedResponse;
+  }
+
+  private buildIceServers(): IceServersResponse {
     const iceServers: IceServer[] = [DEFAULT_STUN];
 
     const turnUrls = process.env.TURN_URLS;
