@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CaptionPanel } from "@/components/caption/caption-panel";
+import { ChatPanel } from "@/components/chat/chat-panel";
 import { TextResponsePanel } from "@/components/chat/text-response-panel";
 import { ConnectionStatus } from "@/components/controls/connection-status";
 import { HandOverlay } from "@/components/hand-tracking/hand-overlay";
@@ -20,6 +21,8 @@ import { QuickReplyMessage, RoomSession, RoomSummary } from "@/types/signbridge"
 interface CallLayoutProps {
   roomId: string;
 }
+
+const MAX_CHAT_MESSAGES = 50;
 
 export function CallLayout({ roomId }: CallLayoutProps) {
   const [room, setRoom] = useState<RoomSummary | null>(null);
@@ -95,8 +98,8 @@ export function CallLayout({ roomId }: CallLayoutProps) {
             );
           },
           onMessage: (payload) => {
-            setMessageFeed((currentFeed) => [...currentFeed.slice(-7), payload]);
-            if (payload.sessionId !== session.sessionId) {
+            setMessageFeed((currentFeed) => [...currentFeed.slice(-(MAX_CHAT_MESSAGES - 1)), payload]);
+            if (payload.sessionId !== session.sessionId && payload.messageType !== "sign_intent") {
               void playTts(payload.content);
             }
           },
@@ -160,7 +163,7 @@ export function CallLayout({ roomId }: CallLayoutProps) {
       room.participants[0]?.sessionId === session.sessionId
   );
 
-  const { localVideoRef, remoteVideoRef, mediaStatus } = useWebRtc({
+  const { localVideoRef, remoteVideoRef, mediaStatus, isCameraOn, isMicOn, toggleCamera, toggleMic } = useWebRtc({
     roomId,
     sessionId: session?.sessionId ?? "",
     sessionToken: session?.sessionToken ?? "",
@@ -274,6 +277,14 @@ export function CallLayout({ roomId }: CallLayoutProps) {
     });
   }
 
+  // 카메라 끄면 수화 모드도 자동 해제 (검은 프레임 오인식 방지)
+  const handleToggleCamera = useCallback(() => {
+    if (isCameraOn && isSignMode) {
+      toggleSignMode();
+    }
+    toggleCamera();
+  }, [isCameraOn, isSignMode, toggleCamera, toggleSignMode]);
+
   function endCall() {
     if (!socket || !session) {
       return;
@@ -304,6 +315,9 @@ export function CallLayout({ roomId }: CallLayoutProps) {
     );
   }
 
+  // 미디어 준비 완료 여부 — 스트림이 없는 상태에서 토글 버튼 비활성화
+  const isMediaReady = mediaStatus === "camera ready" || mediaStatus.startsWith("webrtc ");
+
   // 수화 자막 + 메시지 피드를 합산해 CaptionPanel에 전달
   // 확정 자막은 [수화] 접두어로 구분, 임시 자막은 말줄임표로 표시
   const signCaptionEntries = [
@@ -325,7 +339,6 @@ export function CallLayout({ roomId }: CallLayoutProps) {
     ...(remoteSignModeEnabled ? ["상대방 수화 모드 활성화"] : []),
     ...(socketError ? [`error ${socketError}`] : []),
     ...(pageError ? [`error ${pageError}`] : []),
-    ...messageFeed.map((message) => `${message.nickname}: ${message.content}`),
     ...speechCaptionEntries,
     ...signCaptionEntries
   ].slice(-8);
@@ -360,21 +373,57 @@ export function CallLayout({ roomId }: CallLayoutProps) {
                 playsInline
                 className="aspect-[4/5] w-full rounded-[1.5rem] bg-[#334155] object-cover"
               />
+              {!isCameraOn && (
+                <div className="absolute inset-0 flex items-center justify-center rounded-[1.5rem] bg-gray-900/80">
+                  <span className="text-sm font-medium text-gray-300">카메라 꺼짐</span>
+                </div>
+              )}
               <HandOverlay canvasRef={canvasRef} isVisible={isSignMode} />
             </div>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-[var(--muted)]">
             <span>invite {room?.inviteCode ?? session.inviteCode}</span>
             <span>participants {room?.participants.length ?? 0}/2</span>
+            {/* 마이크 토글 */}
+            <button
+              onClick={toggleMic}
+              disabled={!isMediaReady}
+              aria-label={isMicOn ? "마이크 끄기" : "마이크 켜기"}
+              className={`rounded-full border px-4 py-2 font-medium ${
+                !isMediaReady
+                  ? "cursor-not-allowed border-gray-100 bg-gray-100 text-gray-400"
+                  : isMicOn
+                    ? "border-gray-200 bg-gray-50 text-gray-700"
+                    : "border-amber-200 bg-amber-50 text-amber-700"
+              }`}
+            >
+              {isMicOn ? "🎙️ 마이크" : "🎙️ 마이크 꺼짐"}
+            </button>
+            {/* 카메라 토글 */}
+            <button
+              onClick={handleToggleCamera}
+              disabled={!isMediaReady}
+              aria-label={isCameraOn ? "카메라 끄기" : "카메라 켜기"}
+              className={`rounded-full border px-4 py-2 font-medium ${
+                !isMediaReady
+                  ? "cursor-not-allowed border-gray-100 bg-gray-100 text-gray-400"
+                  : isCameraOn
+                    ? "border-gray-200 bg-gray-50 text-gray-700"
+                    : "border-amber-200 bg-amber-50 text-amber-700"
+              }`}
+            >
+              {isCameraOn ? "📷 카메라" : "📷 카메라 꺼짐"}
+            </button>
             {/* 수화 모드 토글 버튼 */}
             <SignModeButton
               isSignMode={isSignMode}
               isHandDetected={isHandDetected}
               onClick={toggleSignMode}
+              disabled={!isCameraOn}
             />
             <button
               onClick={endCall}
-              className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 font-medium text-rose-700"
+              className="rounded-full border border-rose-400 bg-rose-600 px-4 py-2 font-medium text-white"
             >
               통화 종료
             </button>
@@ -389,6 +438,7 @@ export function CallLayout({ roomId }: CallLayoutProps) {
       </section>
 
       <aside className="grid gap-6">
+        <ChatPanel messages={messageFeed} currentSessionId={session.sessionId} />
         <TextResponsePanel
           value={messageInput}
           onChange={setMessageInput}
