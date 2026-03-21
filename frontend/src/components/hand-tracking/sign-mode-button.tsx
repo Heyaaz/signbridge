@@ -2,21 +2,25 @@ interface SignModeButtonProps {
   isSignMode: boolean;
   isHandDetected: boolean;
   onClick: () => void;
+  disabled?: boolean;
 }
 
 // 수화 모드 토글 버튼
 // 기존 컨트롤 바(통화 종료 버튼 옆)에 배치
-export function SignModeButton({ isSignMode, isHandDetected, onClick }: SignModeButtonProps) {
+export function SignModeButton({ isSignMode, isHandDetected, onClick, disabled }: SignModeButtonProps) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       aria-pressed={isSignMode}
-      aria-label={isSignMode ? "수화 모드 끄기" : "수화 모드 켜기"}
+      aria-label={isSignMode ? "수화 모드 끄기" : "수화 모드 켜기 (카메라가 꺼져 있으면 사용 불가)"}
       className={[
         "inline-flex items-center gap-2 rounded-full border px-4 py-2 font-medium transition-colors",
-        isSignMode
-          ? "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-          : "border-[var(--border)] bg-white/80 text-[var(--muted)] hover:bg-[var(--surface)]",
+        disabled
+          ? "cursor-not-allowed border-gray-100 bg-gray-100 text-gray-400"
+          : isSignMode
+            ? "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+            : "border-[var(--border)] bg-white/80 text-[var(--muted)] hover:bg-[var(--surface)]",
       ].join(" ")}
     >
       {/* 손 이모지 아이콘 */}

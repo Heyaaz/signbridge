@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Socket } from "socket.io-client";
 import { getIceServers } from "@/lib/api";
 
@@ -46,6 +46,8 @@ export function useWebRtc({
   const offerCreatedRef = useRef(false);
   const [mediaStatus, setMediaStatus] = useState("camera not started");
   const [peerReady, setPeerReady] = useState(false);
+  const [isCameraOn, setIsCameraOn] = useState(true);
+  const [isMicOn, setIsMicOn] = useState(true);
 
   useEffect(() => {
     let mounted = true;
@@ -64,6 +66,8 @@ export function useWebRtc({
         }
 
         localStreamRef.current = localStream;
+        setIsCameraOn(localStream.getVideoTracks().length > 0);
+        setIsMicOn(localStream.getAudioTracks().length > 0);
 
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = localStream;
@@ -104,6 +108,8 @@ export function useWebRtc({
       } catch (error) {
         const message = error instanceof Error ? error.message : "media error";
         setMediaStatus(`camera error: ${message}`);
+        setIsCameraOn(false);
+        setIsMicOn(false);
       }
     }
 
@@ -205,9 +211,30 @@ export function useWebRtc({
     void createOffer();
   }, [participantCount, peerReady, roomId, shouldCreateOffer, socket]);
 
+  // localStreamRef는 ref이므로 deps 배열 비워도 안전
+  const toggleCamera = useCallback(() => {
+    const videoTracks = localStreamRef.current?.getVideoTracks();
+    if (!videoTracks || videoTracks.length === 0) return;
+    const newEnabled = !videoTracks[0].enabled;
+    videoTracks.forEach((track) => { track.enabled = newEnabled; });
+    setIsCameraOn(newEnabled);
+  }, []);
+
+  const toggleMic = useCallback(() => {
+    const audioTracks = localStreamRef.current?.getAudioTracks();
+    if (!audioTracks || audioTracks.length === 0) return;
+    const newEnabled = !audioTracks[0].enabled;
+    audioTracks.forEach((track) => { track.enabled = newEnabled; });
+    setIsMicOn(newEnabled);
+  }, []);
+
   return {
     localVideoRef,
     remoteVideoRef,
-    mediaStatus
+    mediaStatus,
+    isCameraOn,
+    isMicOn,
+    toggleCamera,
+    toggleMic
   };
 }
