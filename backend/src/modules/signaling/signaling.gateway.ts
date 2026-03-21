@@ -20,21 +20,17 @@ interface JoinRoomPayload {
 }
 
 interface SignalRelayPayload {
-  roomId: string;
   targetSessionId?: string;
   sdp?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;
 }
 
 interface MessagePayload {
-  roomId: string;
-  sessionToken: string;
   content: string;
 }
 
 interface CallEndPayload {
-  roomId: string;
-  sessionToken: string;
+  [key: string]: unknown;
 }
 
 @WebSocketGateway({
@@ -147,12 +143,11 @@ export class SignalingGateway implements OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: SignalRelayPayload
   ) {
-    if (!this.isValidRoomPayload(socket, payload.roomId)) {
-      return;
-    }
+    const roomId = socket.data.roomId as string | undefined;
+    if (!roomId) return;
 
-    this.emitToPeers(socket, payload.roomId, "webrtc:offer", {
-      roomId: payload.roomId,
+    this.emitToPeers(socket, roomId, "webrtc:offer", {
+      roomId,
       fromSessionId: socket.data.sessionId,
       sdp: payload.sdp
     });
@@ -163,12 +158,11 @@ export class SignalingGateway implements OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: SignalRelayPayload
   ) {
-    if (!this.isValidRoomPayload(socket, payload.roomId)) {
-      return;
-    }
+    const roomId = socket.data.roomId as string | undefined;
+    if (!roomId) return;
 
-    this.emitToPeers(socket, payload.roomId, "webrtc:answer", {
-      roomId: payload.roomId,
+    this.emitToPeers(socket, roomId, "webrtc:answer", {
+      roomId,
       fromSessionId: socket.data.sessionId,
       sdp: payload.sdp
     });
@@ -179,12 +173,11 @@ export class SignalingGateway implements OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: SignalRelayPayload
   ) {
-    if (!this.isValidRoomPayload(socket, payload.roomId)) {
-      return;
-    }
+    const roomId = socket.data.roomId as string | undefined;
+    if (!roomId) return;
 
-    this.emitToPeers(socket, payload.roomId, "webrtc:ice-candidate", {
-      roomId: payload.roomId,
+    this.emitToPeers(socket, roomId, "webrtc:ice-candidate", {
+      roomId,
       fromSessionId: socket.data.sessionId,
       candidate: payload.candidate
     });
@@ -286,10 +279,6 @@ export class SignalingGateway implements OnGatewayDisconnect {
       ok: true,
       messageId: message.id
     };
-  }
-
-  private isValidRoomPayload(socket: Socket, roomId: string): boolean {
-    return Boolean(roomId) && socket.data.roomId === roomId;
   }
 
   private emitToPeers(
