@@ -45,7 +45,7 @@ export interface QuickReplyMessage {
   sessionId: string;
   nickname: string;
   content: string;
-  messageType: "text" | "quick_reply";
+  messageType: "text" | "quick_reply" | "sign_intent";
   createdAt: string;
 }
 
