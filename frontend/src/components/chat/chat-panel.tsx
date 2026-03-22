@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { QuickReplyMessage } from "@/types/signbridge";
+
+/** 하단에서 이 거리(px) 이내에 있으면 새 메시지 도착 시 자동 스크롤 */
+const AUTO_SCROLL_THRESHOLD = 48;
 
 interface ChatPanelProps {
   messages: QuickReplyMessage[];
@@ -32,24 +35,22 @@ export function ChatPanel({ messages, currentSessionId }: ChatPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScroll = useRef(true);
 
+  const lastMessage = messages[messages.length - 1];
+
   // 사용자가 스크롤 위치를 변경하면 자동 스크롤 여부를 업데이트
-  const handleScroll = () => {
+  const handleScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
-    const THRESHOLD = 48;
     shouldAutoScroll.current =
-      el.scrollHeight - el.scrollTop - el.clientHeight < THRESHOLD;
-  };
+      el.scrollHeight - el.scrollTop - el.clientHeight < AUTO_SCROLL_THRESHOLD;
+  }, []);
 
-  // lastMessageId 기준으로 스크롤 — MAX 도달 후 길이가 동일해도 새 메시지 감지
-  const lastMessageId = messages[messages.length - 1]?.id;
+  // lastMessage.id 기준으로 스크롤 — MAX 도달 후 길이가 동일해도 새 메시지 감지
   useEffect(() => {
     if (shouldAutoScroll.current) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [lastMessageId]);
-
-  const lastMessage = messages[messages.length - 1];
+  }, [lastMessage?.id]);
 
   return (
     <div className="rounded-[2rem] border border-[var(--border)] bg-[var(--surface)] p-5">

@@ -4,6 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Socket } from "socket.io-client";
 import { getIceServers } from "@/lib/api";
 
+/** 지정된 트랙 목록의 enabled 상태를 일괄 토글하고 state를 갱신한다 */
+function applyTrackToggle(
+  tracks: MediaStreamTrack[] | undefined,
+  setState: (enabled: boolean) => void
+): void {
+  if (!tracks || tracks.length === 0) return;
+  const newEnabled = !tracks[0].enabled;
+  tracks.forEach((track) => { track.enabled = newEnabled; });
+  setState(newEnabled);
+}
+
 const FALLBACK_RTC_CONFIGURATION: RTCConfiguration = {
   iceServers: [
     {
@@ -213,19 +224,11 @@ export function useWebRtc({
 
   // localStreamRef는 ref이므로 deps 배열 비워도 안전
   const toggleCamera = useCallback(() => {
-    const videoTracks = localStreamRef.current?.getVideoTracks();
-    if (!videoTracks || videoTracks.length === 0) return;
-    const newEnabled = !videoTracks[0].enabled;
-    videoTracks.forEach((track) => { track.enabled = newEnabled; });
-    setIsCameraOn(newEnabled);
+    applyTrackToggle(localStreamRef.current?.getVideoTracks(), setIsCameraOn);
   }, []);
 
   const toggleMic = useCallback(() => {
-    const audioTracks = localStreamRef.current?.getAudioTracks();
-    if (!audioTracks || audioTracks.length === 0) return;
-    const newEnabled = !audioTracks[0].enabled;
-    audioTracks.forEach((track) => { track.enabled = newEnabled; });
-    setIsMicOn(newEnabled);
+    applyTrackToggle(localStreamRef.current?.getAudioTracks(), setIsMicOn);
   }, []);
 
   return {
